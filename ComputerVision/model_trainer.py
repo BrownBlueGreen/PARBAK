@@ -16,8 +16,8 @@ from PIL import Image, ImageDraw, ImageFont
 COCO_DIR = "/tmp/coco"
 DATA_DIR = os.path.join(COCO_DIR, "data")
 # Directory structure
-COCO_TRAIN_DIR = "/tmp/coco/train"
-COCO_VAL_DIR   = "/tmp/coco/val"
+COCO_TRAIN_DIR = "/../coco/train"
+COCO_VAL_DIR   = "/../coco/val"
 
 TRAIN_DATA_DIR   = os.path.join(COCO_TRAIN_DIR, "data")
 VAL_DATA_DIR     = os.path.join(COCO_VAL_DIR, "data")
@@ -57,16 +57,16 @@ class Trainer:
     (self.output_dir / "visualizations").mkdir(parents=True, exist_ok=True)
 
     # 1. Download, export, and initialise interfaces
-    train_data, val_data = download_data()
+    # train_data, val_data = download_data()
 
-    train_data.export(
-      export_dir=COCO_TRAIN_DIR,
-      dataset_type=fo.types.COCODetectionDataset,
-    )
-    val_data.export(
-      export_dir=COCO_VAL_DIR,
-      dataset_type=fo.types.COCODetectionDataset,
-    )
+    # train_data.export(
+    #   export_dir=COCO_TRAIN_DIR,
+    #   dataset_type=fo.types.COCODetectionDataset,
+    # )
+    # val_data.export(
+    #   export_dir=COCO_VAL_DIR,
+    #   dataset_type=fo.types.COCODetectionDataset,
+    # )
 
     with open(TRAIN_LABELS_PATH, "r") as f:
       train_coco = json.load(f)
