@@ -172,8 +172,8 @@ class Trainer:
       "model_state_dict": self.model.state_dict(),
       "optimizer_state_dict": self.optimizer.state_dict(),
       "val_loss": val_loss,
-      "id_2_label": self.dataset.id_2_label,
-      "label_2_id": self.dataset.label_2_id,
+      "id_2_label": self.train_dataset.id_2_label,
+      "label_2_id": self.train_dataset.label_2_id,
       "model_name": MODEL_NAME,
     }
   
@@ -413,7 +413,7 @@ class Trainer:
 
           for box, score, label in zip(boxes, scores, labels):
             x0, y0, x1, y1 = box.tolist()
-            class_name = self.dataset.id_2_label.get(int(label), str(int(label)))
+            class_name = self.train_dataset.id_2_label.get(int(label), str(int(label)))
             text = f"{class_name}: {float(score):.2f}"
 
             draw.rectangle([x0, y0, x1, y1], outline="red", width=3)
