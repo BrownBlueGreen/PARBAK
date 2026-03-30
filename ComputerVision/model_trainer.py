@@ -127,8 +127,6 @@ class Trainer:
 
     collator_fn = DetectionCollator(MODEL_NAME)
 
-    print(self.train_dataset.images[0])
-
     self.train_loader = DataLoader(
       self.train_dataset, 
       batch_size=self.batch_size,
