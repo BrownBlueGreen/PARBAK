@@ -19,6 +19,8 @@ if __name__ == "__main__":
     config_dict = yaml.safe_load(file)
     config = Config(config_dict=config_dict)
 
-  trainer = Trainer(config=config, output_dir=args.output_dir, device="cpu")
+  data_dir = args.data_dir
+
+  trainer = Trainer(config=config, output_dir=args.output_dir, device="cpu", data_dir=data_dir)
 
   trainer.train_one_epoch(0)
