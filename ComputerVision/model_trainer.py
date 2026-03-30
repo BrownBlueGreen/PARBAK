@@ -74,8 +74,8 @@ class Trainer:
     TRAIN_DATA_DIR   = os.path.join(COCO_TRAIN_DIR, "train")
     VAL_DATA_DIR     = os.path.join(COCO_VAL_DIR, "val")
 
-    TRAIN_LABELS_PATH = os.path.join(COCO_TRAIN_DIR, "labels.json")
-    VAL_LABELS_PATH   = os.path.join(COCO_VAL_DIR, "labels.json")
+    TRAIN_LABELS_PATH = os.path.join(TRAIN_DATA_DIR, "labels.json")
+    VAL_LABELS_PATH   = os.path.join(VAL_DATA_DIR, "labels.json")
 
     with open(TRAIN_LABELS_PATH, "r") as f:
       train_coco = json.load(f)
