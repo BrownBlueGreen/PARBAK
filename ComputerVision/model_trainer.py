@@ -71,8 +71,8 @@ class Trainer:
     COCO_TRAIN_DIR = data_dir
     COCO_VAL_DIR   = data_dir
 
-    TRAIN_DATA_DIR   = os.path.join(COCO_TRAIN_DIR, "train")
-    VAL_DATA_DIR     = os.path.join(COCO_VAL_DIR, "val")
+    TRAIN_DATA_DIR   = os.path.join(COCO_TRAIN_DIR, "train/data")
+    VAL_DATA_DIR     = os.path.join(COCO_VAL_DIR, "val/data")
 
     TRAIN_LABELS_PATH = os.path.join(TRAIN_DATA_DIR, "labels.json")
     VAL_LABELS_PATH   = os.path.join(VAL_DATA_DIR, "labels.json")
@@ -124,6 +124,9 @@ class Trainer:
     # 4. torch DataLoader and collator
 
     collator_fn = DetectionCollator(MODEL_NAME)
+
+    print(self.train_dataset.images[0])
+
     self.train_loader = DataLoader(
       self.train_dataset, 
       batch_size=self.batch_size,

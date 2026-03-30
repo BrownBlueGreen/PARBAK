@@ -23,4 +23,4 @@ if __name__ == "__main__":
 
   trainer = Trainer(config=config, output_dir=args.output_dir, device="cpu", data_dir=data_dir)
 
-  trainer.train_one_epoch(0)
+  # trainer.train_one_epoch(0)
