@@ -1,0 +1,27 @@
+data:
+  data_directory: "./data"
+train:
+  batch_size: 2
+  lr: 0.001
+  n_epochs: 30
+  num_workers: 4 # change this based on number of cores on your CPU. 4 is sufficient for 1 gpu. If unsure leave at 1.
+  val_split: 0.2
+  seed: 42
+  checkpoint: 1
+  vis: 10
+  num_fixed_eval_samples: 4
+network:
+  model: vae # vae, gan, diffusion
+  hidden_dim: 512 # used for VAE and gan
+  latent_dim: 128 # used for VAE or gan
+vae:
+  vae_recon_loss: l1 # l1 or l2
+  beta: 0.01
+diffusion:
+  time_dim: 128
+  timesteps: 500
+optimizer:
+  type: "adamw" # adamw or sgd
+  weight_decay: 0.0 #0.001
+gan:
+  leaky: False

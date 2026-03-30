@@ -1,79 +1,35 @@
 import os
-from PIL import Image
-from collections import defaultdict
-from torch.utils.data import Dataset
-from transformers import RTDetrV2ForObjectDetection, AutoImageProcessor
+import torch
+import fiftyone as fo
+import fiftyone.zoo as foz
+import random
+import numpy as np
+from class_labels import TARGET_CLASSES
 
-MODEL_NAME = "PekingU/rtdetr_v2_r50vd"
-
-def detection_raw_collate_fn(batch):
-  """
-  Collate function for object detection
-
-  since images have different sizes and each image can have varying number of 
-  annotations, don't stack them yet 
-
-  returns:
-    images: list of images
-    targets: list of target dicts
-  """
-
-  images = [ item[0] for item in batch ]
-  targets = [ item[1] for item in batch ]
-
-  return images, targets
-
-def detection_collate_fn(batch):
-  """
-  Collate function for object detection
-
-  since images have different sizes and each image can have varying number of 
-  annotations, don't stack them yet 
-
-  returns:
-    images: list of images
-    targets: list of target dicts
-  """
-  image_processor = AutoImageProcessor.from_pretrained(MODEL_NAME)
-  images = [item[0] for item in batch]
-  targets = [item[1] for item in batch]
-
-  encoding = image_processor(
-    images=images,
-    annotations=targets,
-    return_tensors="pt"
+def download_data():
+  train = foz.load_zoo_dataset(
+    "open-images-v7",
+    split="train",
+    label_types=["detections"],
+    classes=TARGET_CLASSES,
+    only_matching=True,
+    max_samples=5000,
+    shuffle=True,
+    seed=42,
+    dataset_name="oi_train",
   )
-
-  return {
-    "pixel_values": encoding["pixel_values"],
-    "pixel_mask": encoding.get("pixel_mask"),
-    "labels": encoding["labels"],
-  }
-
-class DatasetInterface(Dataset):
-  def __init__(self, coco: dict, img_dir: str):
-    self.images = coco["images"]
-    self.img_dir = img_dir
-    self.anno_map = {ann["image_id"]: ann for ann in coco["annotations"]}
-    self.id2label = {cat["id"]: cat["name"] for cat in coco["categories"]}
-    self.label2id = {cat["name"]: cat["id"] for cat in coco["categories"]}
-
-  def __len__(self) -> int:
-    return len(self.images)
-  
-  def __getitem__(self, idx: int):
-    image_info = self.images[idx]
-    image_id = image_info["id"]
-
-    image_path = os.path.join(self.img_dir, image_info["file_name"])
-    image = Image.open(image_path).convert("RGB")
-
-    target = {
-      "image_id": image_id,
-      "annotations": self.ann_map.get(image_id, []),
-    }
-
-    return image, target
+  val = foz.load_zoo_dataset(
+    "open-images-v7",
+    split="validation",
+    label_types=["detections"],
+    classes=TARGET_CLASSES,
+    only_matching=True,
+    max_samples=1000,
+    shuffle=True,
+    seed=42,
+    dataset_name="oi_val",
+  )
+  return train, val
 
 class AverageMeter:
   """
@@ -94,13 +50,54 @@ class AverageMeter:
   def update(self, val: float, n: int = 1):
     self.val = float(val)
     self.sum += float(val) * n
-    self.cout += n
+    self.count += n
     self.avg = self.sum / self.count if self.count > 0 else 0.0
 
   def __str__(self):
     return f"{self.name}: val={self.val:.4f}, avg={self.avg:.4f}"
   
+class Config:
+  def __init__(self, config_dict):
+    for key, value in config_dict.items():
+      if isinstance(value, dict):
+        value = Config(value)
+      setattr(self, key, value)
 
+def get_device():
+  # if you want to default to cuda first change order.
+  if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+    device = torch.device("mps")
+    print("Using MPS.")
+  elif torch.cuda.is_available():
+    device = torch.device("cuda")
+    print(f"Using CUDA (gpu: {torch.cuda.get_device_name(0)}).")
+  else:
+    device = torch.device("cpu")
+    print("Using CPU")
+  return device
 
+def compute_params(model):
+  total = 0
+  for param in model.parameters():
+    total += param.numel()
+  print(f'total parameters {total}')
+
+def set_seed(seed=42):
+  random.seed(seed)
+  np.random.seed(seed)
+  torch.manual_seed(seed)
+  if torch.cuda.is_available():
+      torch.cuda.manual_seed(seed)
+      torch.cuda.manual_seed_all(seed)
+      torch.backends.cudnn.deterministic = True
+      torch.backends.cudnn.benchmark = False
+  # print(f'set seed to {seed}')
+
+def load_pt_data(load_path):
+  if not os.path.exists(load_path):
+      raise FileNotFoundError(f"dataset not found at {load_path}")
+  
+  data = torch.load(load_path)
+  return data
 
 
