@@ -24,7 +24,7 @@ VAL_DATA_DIR     = os.path.join(COCO_VAL_DIR, "data")
 
 TRAIN_LABELS_PATH = os.path.join(COCO_TRAIN_DIR, "labels.json")
 VAL_LABELS_PATH   = os.path.join(COCO_VAL_DIR, "labels.json")
-MODEL_NAME = "PekingU/rtdetr_v2_r50vd"
+MODEL_NAME = "PekingU/rtdetr_v2_r18vd"
 
 class Trainer:
   def __init__(self, config, output_dir=None, device=None, data_dir=None):
@@ -77,7 +77,7 @@ class Trainer:
     VAL_DATA_DIR     = os.path.join(VAL_DIR, "data")
 
     TRAIN_LABELS_PATH = os.path.join(TRAIN_DIR, "labels.json")
-    VAL_LABELS_PATH   = os.path.join(TRAIN_DIR, "labels.json")
+    VAL_LABELS_PATH   = os.path.join(VAL_DIR, "labels.json")
 
     with open(TRAIN_LABELS_PATH, "r") as f:
       train_coco = json.load(f)
