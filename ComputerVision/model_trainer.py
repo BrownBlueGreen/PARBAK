@@ -68,14 +68,16 @@ class Trainer:
     #   dataset_type=fo.types.COCODetectionDataset,
     # )
 
-    COCO_TRAIN_DIR = data_dir
-    COCO_VAL_DIR   = data_dir
+    DATA_DIR = data_dir
 
-    TRAIN_DATA_DIR   = os.path.join(COCO_TRAIN_DIR, "train/data")
-    VAL_DATA_DIR     = os.path.join(COCO_VAL_DIR, "val/data")
+    TRAIN_DIR = os.path.join(DATA_DIR, "train")
+    VAL_DIR = os.path.join(DATA_DIR, "val")
 
-    TRAIN_LABELS_PATH = os.path.join(TRAIN_DATA_DIR, "labels.json")
-    VAL_LABELS_PATH   = os.path.join(VAL_DATA_DIR, "labels.json")
+    TRAIN_DATA_DIR   = os.path.join(TRAIN_DIR, "train/data")
+    VAL_DATA_DIR     = os.path.join(VAL_DIR, "val/data")
+
+    TRAIN_LABELS_PATH = os.path.join(TRAIN_DIR, "labels.json")
+    VAL_LABELS_PATH   = os.path.join(TRAIN_DIR, "labels.json")
 
     with open(TRAIN_LABELS_PATH, "r") as f:
       train_coco = json.load(f)
