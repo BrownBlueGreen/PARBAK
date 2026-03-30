@@ -27,7 +27,7 @@ VAL_LABELS_PATH   = os.path.join(COCO_VAL_DIR, "labels.json")
 MODEL_NAME = "PekingU/rtdetr_v2_r50vd"
 
 class Trainer:
-  def __init__(self, config, output_dir=None, device=None):
+  def __init__(self, config, output_dir=None, device=None, data_dir=None):
     self.config = config
     self.num_workers = self.config.train.num_workers
     self.batch_size = self.config.train.batch_size
@@ -67,6 +67,15 @@ class Trainer:
     #   export_dir=COCO_VAL_DIR,
     #   dataset_type=fo.types.COCODetectionDataset,
     # )
+
+    COCO_TRAIN_DIR = data_dir
+    COCO_VAL_DIR   = data_dir
+
+    TRAIN_DATA_DIR   = os.path.join(COCO_TRAIN_DIR, "data")
+    VAL_DATA_DIR     = os.path.join(COCO_VAL_DIR, "data")
+
+    TRAIN_LABELS_PATH = os.path.join(COCO_TRAIN_DIR, "labels.json")
+    VAL_LABELS_PATH   = os.path.join(COCO_VAL_DIR, "labels.json")
 
     with open(TRAIN_LABELS_PATH, "r") as f:
       train_coco = json.load(f)

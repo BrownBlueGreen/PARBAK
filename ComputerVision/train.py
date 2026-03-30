@@ -11,6 +11,7 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="trainer")
   parser.add_argument('--config_file', type=str, default='config/config.yaml', help="path to YAML config")
   parser.add_argument('--output_dir', type=str, default=None, help="path to output directory (optional); defaults to outputs/model_name")
+  parser.add_argument('--data_dir', type=str, default=None, help="path to data directory")
   args = parser.parse_args()
 
   # Load YAML configuration
