@@ -71,8 +71,8 @@ class Trainer:
     COCO_TRAIN_DIR = data_dir
     COCO_VAL_DIR   = data_dir
 
-    TRAIN_DATA_DIR   = os.path.join(COCO_TRAIN_DIR, "data")
-    VAL_DATA_DIR     = os.path.join(COCO_VAL_DIR, "data")
+    TRAIN_DATA_DIR   = os.path.join(COCO_TRAIN_DIR, "train")
+    VAL_DATA_DIR     = os.path.join(COCO_VAL_DIR, "val")
 
     TRAIN_LABELS_PATH = os.path.join(COCO_TRAIN_DIR, "labels.json")
     VAL_LABELS_PATH   = os.path.join(COCO_VAL_DIR, "labels.json")
