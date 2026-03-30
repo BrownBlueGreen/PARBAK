@@ -73,8 +73,8 @@ class Trainer:
     TRAIN_DIR = os.path.join(DATA_DIR, "train")
     VAL_DIR = os.path.join(DATA_DIR, "val")
 
-    TRAIN_DATA_DIR   = os.path.join(TRAIN_DIR, "train/data")
-    VAL_DATA_DIR     = os.path.join(VAL_DIR, "val/data")
+    TRAIN_DATA_DIR   = os.path.join(TRAIN_DIR, "data")
+    VAL_DATA_DIR     = os.path.join(VAL_DIR, "data")
 
     TRAIN_LABELS_PATH = os.path.join(TRAIN_DIR, "labels.json")
     VAL_LABELS_PATH   = os.path.join(TRAIN_DIR, "labels.json")
