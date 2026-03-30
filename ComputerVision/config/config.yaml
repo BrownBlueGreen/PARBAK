@@ -16,5 +16,3 @@ diffusion:
 optimizer:
   type: "adamw" # adamw or sgd
   weight_decay: 0.0 #0.001
-gan:
-  leaky: False
