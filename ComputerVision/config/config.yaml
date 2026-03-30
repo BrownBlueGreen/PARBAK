@@ -2,7 +2,7 @@ data:
   data_directory: "./data"
 train:
   batch_size: 16
-  lr: 0.001
+  lr: 0.0001
   n_epochs: 30
   num_workers: 1 # change this based on number of cores on your CPU. 4 is sufficient for 1 gpu. If unsure leave at 1.
   val_split: 0.2
