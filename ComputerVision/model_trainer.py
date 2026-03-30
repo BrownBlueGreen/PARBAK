@@ -47,7 +47,7 @@ class Trainer:
     self.device = device if device is not None else get_device()
 
     if output_dir is None:
-      self.output_dir = Path(f"./outputs/{self.config.network.model.lower()}")
+      self.output_dir = Path(f"./outputs")
     else:
       self.output_dir = output_dir
 
