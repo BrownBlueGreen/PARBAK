@@ -37,7 +37,7 @@ class Trainer:
     self.val_split = getattr(self.config.train, "val_split", 0.2)
     self.seed = getattr(self.config.train, "seed", 42)
     self.checkpoint = getattr(self.config.train, "checkpoint", 1)
-    self.vis_every = getattr(self.config.train, "vis", 1)
+    self.vis_every = getattr(self.config.train, "vis", 10)
     self.num_fixed_eval_samples = getattr(self.config.train, "num_fixed_eval_samples", 4)
 
     set_seed(self.seed)
@@ -375,7 +375,7 @@ class Trainer:
     with torch.no_grad():
       for idx, (image, target) in enumerate(self.fixed_eval_samples):
         # Build a single-item batch using the collator
-        batch = self.train_loader.collator([(image, target)])
+        batch = self.train_loader.collate_fn([(image, target)])
 
         pixel_values = batch["pixel_values"].to(self.device)
         pixel_mask = batch.get("pixel_mask")
@@ -398,7 +398,7 @@ class Trainer:
         draw = ImageDraw.Draw(img)
 
         # Process with collator post processor
-        processor = getattr(self.collator, "image_processor", None)
+        processor = getattr(self.train_dataset.collate_fn.image_processor, "image_processor", None)
         if processor is not None and hasattr(processor, "post_process_object_detection"):
           target_sizes = torch.tensor([[img.height, img.width]], device=self.device)
           results = processor.post_process_object_detection(
@@ -447,6 +447,8 @@ class Trainer:
       metrics = self.evaluate(epoch)
       val_loss = metrics["val_loss"]
       is_best = val_loss < self.best_val_loss
+      if val_loss < self.best_val_loss:
+        self.best_val_loss = val_loss
       self.save_checkpoint(epoch, val_loss=val_loss, is_best=is_best)
 
       if(epoch + 1) % self.vis_every == 0:
@@ -459,3 +461,156 @@ class Trainer:
       )
 
     
+
+  def _cxcywh_to_xyxy(self, boxes: torch.Tensor) -> torch.Tensor:
+    """
+    Convert boxes from [cx, cy, w, h] to [x0, y0, x1, y1].
+    Assumes boxes shape is [N, 4].
+    """
+    cx, cy, w, h = boxes.unbind(-1)
+    x0 = cx - 0.5 * w
+    y0 = cy - 0.5 * h
+    x1 = cx + 0.5 * w
+    y1 = cy + 0.5 * h
+    return torch.stack([x0, y0, x1, y1], dim=-1)
+
+  def visualize_random_val_prediction_with_gt(self, epoch=None, threshold=0.3, save_name=None):
+    """
+    Pick a random validation sample, run inference, and save a visualization
+    with both ground-truth boxes and predicted boxes.
+
+    Color convention:
+      - Green: ground truth
+      - Red: predictions
+
+    Args:
+        epoch (int | None):
+            Optional epoch index, used in output filename.
+        threshold (float):
+            Score threshold for prediction post-processing.
+        save_name (str | None):
+            Optional custom filename.
+
+    Returns:
+        Path: path to the saved visualization
+    """
+    self.model.eval()
+
+    vis_dir = self.output_dir / "visualizations"
+    vis_dir.mkdir(parents=True, exist_ok=True)
+
+    if len(self.val_dataset) == 0:
+      raise ValueError("Validation dataset is empty.")
+
+    sample_idx = random.randrange(len(self.val_dataset))
+    image, target = self.val_dataset[sample_idx]
+
+    collator = self.val_loader.collate_fn
+    processor = getattr(collator, "image_processor", None)
+    if processor is None:
+        raise ValueError("Validation collate_fn does not have an image_processor.")
+
+    batch = collator([(image, target)])
+
+    pixel_values = batch["pixel_values"].to(self.device)
+    pixel_mask = batch.get("pixel_mask")
+    if pixel_mask is not None:
+        pixel_mask = pixel_mask.to(self.device)
+
+    labels = self._move_labels_to_device(batch["labels"], self.device)
+
+    with torch.no_grad():
+        outputs = self.model(
+            pixel_values=pixel_values,
+            pixel_mask=pixel_mask,
+        )
+
+    if isinstance(image, torch.Tensor):
+        img = self.tensor_to_pil(image)
+    elif isinstance(image, Image.Image):
+        img = image.copy()
+    else:
+        raise TypeError(f"Unsupported image type: {type(image)}")
+
+    draw = ImageDraw.Draw(img)
+    font = ImageFont.load_default()
+
+    # -------- Predictions (red) --------
+    target_sizes = torch.tensor([[img.height, img.width]], device=self.device)
+    pred_results = processor.post_process_object_detection(
+        outputs,
+        threshold=threshold,
+        target_sizes=target_sizes,
+    )[0]
+
+    pred_boxes = pred_results["boxes"].detach().cpu()
+    pred_scores = pred_results["scores"].detach().cpu()
+    pred_labels = pred_results["labels"].detach().cpu()
+
+    # -------- Ground truth (green) --------
+    # batch["labels"] after collate/image_processor is usually in HF training format:
+    #   boxes: normalized cxcywh
+    #   class_labels: class ids
+    gt = labels[0]
+
+    gt_boxes = gt["boxes"]
+    gt_labels = gt["class_labels"]
+
+    # Convert normalized cxcywh -> absolute xyxy
+    gt_boxes_xyxy = self._cxcywh_to_xyxy(gt_boxes)
+
+    h, w = gt["orig_size"]
+    scale = torch.tensor([w, h, w, h], device=gt_boxes_xyxy.device, dtype=gt_boxes_xyxy.dtype)
+    gt_boxes_xyxy = (gt_boxes_xyxy * scale).detach().cpu()
+    gt_labels = gt_labels.detach().cpu()
+
+    # -------- Draw ground truth --------
+    for box, label in zip(gt_boxes_xyxy, gt_labels):
+        x0, y0, x1, y1 = box.tolist()
+        class_id = int(label)
+
+        if hasattr(self.val_dataset, "id_2_label"):
+            class_name = self.val_dataset.id_2_label.get(class_id, str(class_id))
+        elif hasattr(self.train_dataset, "id_2_label"):
+            class_name = self.train_dataset.id_2_label.get(class_id, str(class_id))
+        else:
+            class_name = str(class_id)
+
+        text = f"GT: {class_name}"
+
+        draw.rectangle([x0, y0, x1, y1], outline="green", width=3)
+        draw.text((x0, max(0, y0 - 12)), text, fill="green", font=font)
+
+    # -------- Draw predictions --------
+    for box, score, label in zip(pred_boxes, pred_scores, pred_labels):
+        x0, y0, x1, y1 = box.tolist()
+        class_id = int(label)
+
+        if hasattr(self.val_dataset, "id_2_label"):
+            class_name = self.val_dataset.id_2_label.get(class_id, str(class_id))
+        elif hasattr(self.train_dataset, "id_2_label"):
+            class_name = self.train_dataset.id_2_label.get(class_id, str(class_id))
+        else:
+            class_name = str(class_id)
+
+        text = f"Pred: {class_name} {float(score):.2f}"
+
+        draw.rectangle([x0, y0, x1, y1], outline="red", width=3)
+        draw.text((x0, min(img.height - 12, y1)), text, fill="red", font=font)
+
+    # -------- Save --------
+    if save_name is None:
+        if epoch is not None:
+            save_name = f"epoch_{epoch + 1}_random_val_with_gt_{sample_idx}.png"
+        else:
+            save_name = f"random_val_with_gt_{sample_idx}.png"
+
+    save_path = vis_dir / save_name
+    img.save(save_path)
+
+    print(f"Saved random validation visualization with GT to: {save_path}")
+    print(f"Sample index: {sample_idx}")
+    print(f"GT boxes: {len(gt_boxes_xyxy)}")
+    print(f"Pred boxes kept: {len(pred_boxes)}")
+
+    return save_path
