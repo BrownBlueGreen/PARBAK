@@ -1,30 +1,15 @@
-import os, time
-import json
-import torch
-from pathlib import Path
-from utils import download_data
+import fiftyone as fo, math, json, os, random, time, torch
 from data_interface import DatasetInterface
 from detection_collator import DetectionCollator
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
+from utils import set_seed, get_device, AverageMeter 
 from torch.utils.data import DataLoader, random_split
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
+from torch.optim.lr_scheduler import LambdaLR
 from transformers import AutoModelForObjectDetection
-from utils import set_seed, get_device, AverageMeter 
-import fiftyone as fo
-from PIL import Image, ImageDraw, ImageFont
 
-
-COCO_DIR = "/tmp/coco"
-DATA_DIR = os.path.join(COCO_DIR, "data")
-# Directory structure
-COCO_TRAIN_DIR = "/../coco/train"
-COCO_VAL_DIR   = "/../coco/val"
-
-TRAIN_DATA_DIR   = os.path.join(COCO_TRAIN_DIR, "data")
-VAL_DATA_DIR     = os.path.join(COCO_VAL_DIR, "data")
-
-TRAIN_LABELS_PATH = os.path.join(COCO_TRAIN_DIR, "labels.json")
-VAL_LABELS_PATH   = os.path.join(COCO_VAL_DIR, "labels.json")
-MODEL_NAME = "PekingU/rtdetr_v2_r18vd"
+MODEL_NAME = "PekingU/rtdetr_v2_r34vd"
 
 class Trainer:
   def __init__(self, config, output_dir=None, device=None, data_dir=None):
@@ -39,17 +24,16 @@ class Trainer:
     self.checkpoint = getattr(self.config.train, "checkpoint", 1)
     self.vis_every = getattr(self.config.train, "vis", 10)
     self.num_fixed_eval_samples = getattr(self.config.train, "num_fixed_eval_samples", 4)
-
-    set_seed(self.seed)
     
-    self.data_dir = self.config.data.data_directory
+    self.unfreeze_epoch = getattr(self.config.train, "unfreeze_epoch", 3)
+    self.frozen = True
+    
+    self.data_dir = data_dir if data_dir is not None else self.config.data.data_directory
+    DATA_DIR = self.data_dir
 
     self.device = device if device is not None else get_device()
 
-    if output_dir is None:
-      self.output_dir = Path(f"./outputs")
-    else:
-      self.output_dir = output_dir
+    self.output_dir = Path(output_dir) if output_dir is not None else Path("./outputs")
 
     # Make the appropriate 
     self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -67,8 +51,6 @@ class Trainer:
     #   export_dir=COCO_VAL_DIR,
     #   dataset_type=fo.types.COCODetectionDataset,
     # )
-
-    DATA_DIR = data_dir
 
     TRAIN_DIR = os.path.join(DATA_DIR, "train")
     VAL_DIR = os.path.join(DATA_DIR, "val")
@@ -124,7 +106,6 @@ class Trainer:
     self.model.to(self.device)
     
     # 4. torch DataLoader and collator
-
     collator_fn = DetectionCollator(MODEL_NAME)
 
     self.train_loader = DataLoader(
@@ -133,7 +114,7 @@ class Trainer:
       shuffle=True,
       num_workers=self.num_workers,
       collate_fn=collator_fn,
-      pin_memory=(self.device == "cuda"),
+      pin_memory = str(self.device).startswith("cuda"),
     )
 
     self.val_loader = DataLoader(
@@ -142,20 +123,24 @@ class Trainer:
       shuffle=False,
       num_workers=self.num_workers,
       collate_fn=collator_fn,
-      pin_memory=(self.device == "cuda"),
+      pin_memory = str(self.device).startswith("cuda"),
     )
     
     # 5. Optimizer
-    self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr)
+    self.freeze_backbone()
+    self.optimizer = self.build_optimizer()
+    self.scheduler = self.build_scheduler(current_epoch=0)
 
     # Fixed samples for qualitative evaluation
     self.fixed_eval_samples = self.get_fixed_samples(self.val_dataset, self.num_fixed_eval_samples)
     self.best_val_loss = float("inf")
 
-  def get_fixed_samples(self, dataset, n_samples=8, start_idx=100):
-    n_samples = min(n_samples, len(dataset))
-    return [dataset[i] for i in range(start_idx, n_samples)]
+  # MOVE OUT OF CLASS MAYBE TO DATA 
+  def get_fixed_samples(self, dataset, n_samples=8, start_idx=0):
+    end_idx = min(start_idx + n_samples, len(dataset))
+    return [dataset[i] for i in range(start_idx, end_idx)]
   
+  # MOVE OUT OF CLASS MAYBE TO DATA
   def _move_labels_to_device(self, labels, device):
     moved = []
     for label_dict in labels:
@@ -171,6 +156,10 @@ class Trainer:
       "epoch": epoch,
       "model_state_dict": self.model.state_dict(),
       "optimizer_state_dict": self.optimizer.state_dict(),
+      "scheduler_state_dict": self.scheduler.state_dict(),
+      "best_val_loss": self.best_val_loss,
+      "frozen": self.frozen,
+      "unfreeze_epoch": self.unfreeze_epoch,
       "val_loss": val_loss,
       "id_2_label": self.train_dataset.id_2_label,
       "label_2_id": self.train_dataset.label_2_id,
@@ -198,10 +187,27 @@ class Trainer:
   def load_checkpoint(self, checkpoint_path):
     checkpoint = torch.load(checkpoint_path, map_location=self.device)
     self.model.load_state_dict(checkpoint["model_state_dict"])
+
+    self.unfreeze_epoch = checkpoint.get("unfreeze_epoch", 3)
+    self.frozen = checkpoint.get("frozen", True)
+
+    if self.frozen:
+        self.freeze_backbone()
+    else:
+        self.unfreeze_all()
+
+    self.optimizer = self.build_optimizer()
+
+    saved_epoch = checkpoint.get("epoch", -1)
+    next_epoch = saved_epoch + 1
+    self.scheduler = self.build_scheduler(current_epoch=next_epoch)
+
     self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    self.best_val_loss = checkpoint.get("val_loss", float("inf"))
+    self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
+    self.best_val_loss = checkpoint.get("best_val_loss", float("inf"))
     print(f"Loaded checkpoint from {checkpoint_path}")
-    return checkpoint.get("epoch", -1)
+    return saved_epoch
 
   def train_one_epoch(self, epoch, debug=False):
     self.model.train()
@@ -233,6 +239,12 @@ class Trainer:
                     print(f"    {k}: shape={v.shape}, dtype={v.dtype}, min={v.min():.3f}, max={v.max():.3f}")
         break  # only check first batch
 
+    if self.frozen and (epoch >= self.unfreeze_epoch):
+      self.unfreeze_all()
+      self.frozen = False
+      self.optimizer = self.build_optimizer()
+      self.scheduler = self.build_scheduler(current_epoch=epoch)
+
     for i, batch in enumerate(self.train_loader):
       start = time.time()
       pixel_values = batch["pixel_values"].to(self.device)
@@ -249,9 +261,10 @@ class Trainer:
       )
 
       loss = outputs.loss
-      self.optimizer.zero_grad()
       loss.backward()
       self.optimizer.step()
+      self.scheduler.step()
+      self.optimizer.zero_grad()
 
       batch_size = pixel_values.size(0)
       loss_meter.update(loss.item(), batch_size)
@@ -327,15 +340,37 @@ class Trainer:
         metric_targets = []
 
         for pred, target in zip(predictions, labels):
+          # -------------------------
+          # Predictions (already OK)
+          # -------------------------
           metric_preds.append({
             "boxes": pred["boxes"].detach().cpu(),
             "scores": pred["scores"].detach().cpu(),
             "labels": pred["labels"].detach().cpu(),
           })
 
+          # -------------------------
+          # Ground truth FIX
+          # -------------------------
+          gt_boxes = target["boxes"]          # [N, 4] (cx, cy, w, h) normalized
+          gt_labels = target["class_labels"]
+
+          # 1. Convert cxcywh → xyxy
+          gt_boxes_xyxy = self._cxcywh_to_xyxy(gt_boxes)
+
+          # 2. Scale to absolute image size
+          h, w = target["orig_size"]
+          scale = torch.tensor(
+            [w, h, w, h],
+            device=gt_boxes_xyxy.device,
+            dtype=gt_boxes_xyxy.dtype
+          )
+          gt_boxes_xyxy = gt_boxes_xyxy * scale
+
+          # 3. Move to CPU
           metric_targets.append({
-            "boxes": target["boxes"].detach().cpu(),
-            "labels": target["class_labels"].detach().cpu(),
+            "boxes": gt_boxes_xyxy.detach().cpu(),
+            "labels": gt_labels.detach().cpu(),
           })
         
         map.update(metric_preds, metric_targets)
@@ -398,7 +433,7 @@ class Trainer:
         draw = ImageDraw.Draw(img)
 
         # Process with collator post processor
-        processor = getattr(self.train_dataset.collate_fn.image_processor, "image_processor", None)
+        processor = getattr(self.train_loader.collate_fn, "image_processor", None)
         if processor is not None and hasattr(processor, "post_process_object_detection"):
           target_sizes = torch.tensor([[img.height, img.width]], device=self.device)
           results = processor.post_process_object_detection(
@@ -439,10 +474,10 @@ class Trainer:
     image = image.permute(1, 2, 0).numpy()
     return Image.fromarray(image)
   
-  def fit(self):
+  def fit(self, start_epoch = 0):
     print(f"Training on device: {self.device}")
 
-    for epoch in range(self.n_epochs):
+    for epoch in range(start_epoch, self.n_epochs):
       train_loss = self.train_one_epoch(epoch)
       metrics = self.evaluate(epoch)
       val_loss = metrics["val_loss"]
@@ -459,8 +494,6 @@ class Trainer:
         f"Train loss: {train_loss:.4f}, Val loss: {val_loss:.4f}, "
         f"Best val loss: {self.best_val_loss:.4f}"
       )
-
-    
 
   def _cxcywh_to_xyxy(self, boxes: torch.Tensor) -> torch.Tensor:
     """
@@ -614,3 +647,77 @@ class Trainer:
     print(f"Pred boxes kept: {len(pred_boxes)}")
 
     return save_path
+  
+  def build_optimizer(self):
+    backbone_params = []
+    pretrained_other_params = []
+    new_head_params = []
+
+    new_head_prefixes = [
+        "model.denoising_class_embed",
+        "model.enc_score_head",
+        "model.decoder.class_embed",
+    ]
+
+    for name, param in self.model.named_parameters():
+      if not param.requires_grad:
+        continue
+
+      if name.startswith("model.backbone."):
+        backbone_params.append(param)
+      elif any(name.startswith(prefix) for prefix in new_head_prefixes):
+        new_head_params.append(param)
+      else:
+        pretrained_other_params.append(param)
+
+    optimizer = torch.optim.AdamW(
+      [
+        {"params": backbone_params, "lr": self.config.optimizer.backbone_lr},
+        {"params": pretrained_other_params, "lr": self.config.optimizer.transformer_lr},
+        {"params": new_head_params, "lr": self.config.optimizer.head_lr},
+      ],
+      weight_decay=self.config.optimizer.weight_decay,
+    )
+    return optimizer
+
+  def freeze_backbone(self):
+    for name, param in self.model.named_parameters():
+      if "backbone" in name:
+        param.requires_grad = False
+
+  def unfreeze_all(self):
+    for param in self.model.parameters():
+      param.requires_grad = True
+
+  def build_scheduler(self, current_epoch=0):
+    steps_per_epoch = len(self.train_loader)
+
+    if self.frozen and self.unfreeze_epoch > 0:
+      phase_epochs = min(self.unfreeze_epoch, self.n_epochs)
+      total_steps = max(1, steps_per_epoch * phase_epochs)
+      warmup_steps = int(0.01 * total_steps)
+    
+    else:
+      remaining_epochs = max(0, self.n_epochs - current_epoch)
+      total_steps = max(1, steps_per_epoch * remaining_epochs)
+      warmup_steps = int(0.01 * total_steps)
+    
+    return self.build_warmup_cosine_scheduler(
+      warmup_steps=warmup_steps,
+      total_steps=total_steps
+    )
+
+  def build_warmup_cosine_scheduler(self, warmup_steps, total_steps):
+    def lr_lambda(current_step):
+      if current_step < warmup_steps:
+        return float(current_step + 1) / float(max(1, warmup_steps))
+
+      progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+      return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    return LambdaLR(self.optimizer, lr_lambda)
+
+
+
+
+
