@@ -23,6 +23,5 @@ if __name__ == "__main__":
 
   trainer = Trainer(config=config, output_dir=args.output_dir, data_dir=data_dir)
 
-  for name, param in trainer.model.named_parameters():
-    print(name)
+  trainer.fit()
 
