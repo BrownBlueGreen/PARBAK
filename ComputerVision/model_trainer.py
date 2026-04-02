@@ -9,51 +9,52 @@ from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from torch.optim.lr_scheduler import LambdaLR
 from transformers import AutoModelForObjectDetection
 
-MODEL_NAME = "PekingU/rtdetr_v2_r34vd"
+MODEL_NAME = "PekingU/rtdetr_v2_r18vd"
+
+# data:
+#   data_directory: "./data"
+#   output_directory: "./output"
+# train:
+#   batch_size: 16
+#   n_epochs: 30
+#   num_workers: 1 # change this based on number of cores on your CPU. 4 is sufficient for 1 gpu. If unsure leave at 1.
+#   val_split: 0.2
+#   seed: 42
+#   checkpoint: 10
+#   vis: 10
+#   num_fixed_eval_samples: 4
+#   unfreeze_epoch: 3
+# optimizer:
+#   type: "adamw" # adamw or sgd
+#   weight_decay: 0.0001 #0.001
+#   backbone_lr: 0.0001
+#   transformer_lr: 0.0001
+#   head_lr: 0.001
 
 class Trainer:
   def __init__(self, config, output_dir=None, device=None, data_dir=None):
-    self.config = config
-    self.num_workers = self.config.train.num_workers
-    self.batch_size = self.config.train.batch_size
-    self.lr = self.config.train.lr
-    self.n_epochs = self.config.train.n_epochs
-    
-    self.val_split = getattr(self.config.train, "val_split", 0.2)
-    self.seed = getattr(self.config.train, "seed", 42)
-    self.checkpoint = getattr(self.config.train, "checkpoint", 1)
-    self.vis_every = getattr(self.config.train, "vis", 10)
+
+    self.config                 = config
+    self.data_dir               = data_dir if data_dir is not None else self.config.data.data_directory
+    self.batch_size             = getattr(self.config.train, "batch_size", 1)
+    self.n_epochs               = getattr(self.config.train, "n_epochs", 1)
+    self.num_workers            = getattr(self.config.train, "num_workers", 1)
+    self.val_split              = getattr(self.config.train, "val_split", 0.2)
+    self.seed                   = getattr(self.config.train, "seed", 42)
+    self.checkpoint             = getattr(self.config.train, "checkpoint", 1)
+    self.vis_every              = getattr(self.config.train, "vis", 10)
     self.num_fixed_eval_samples = getattr(self.config.train, "num_fixed_eval_samples", 4)
-    
-    self.unfreeze_epoch = getattr(self.config.train, "unfreeze_epoch", 3)
-    self.frozen = True
-    
-    self.data_dir = data_dir if data_dir is not None else self.config.data.data_directory
-    DATA_DIR = self.data_dir
+    self.unfreeze_epoch         = getattr(self.config.train, "unfreeze_epoch", 3)
+    self.frozen                 = True
+    self.device                 = device if device is not None else get_device()
+    self.output_dir             = Path(output_dir) if output_dir is not None else self.config.data.output_directory
 
-    self.device = device if device is not None else get_device()
-
-    self.output_dir = Path(output_dir) if output_dir is not None else Path("./outputs")
-
-    # Make the appropriate 
     self.output_dir.mkdir(parents=True, exist_ok=True)
     (self.output_dir / "checkpoints").mkdir(parents=True, exist_ok=True)
     (self.output_dir / "visualizations").mkdir(parents=True, exist_ok=True)
 
-    # 1. Download, export, and initialise interfaces
-    # train_data, val_data = download_data()
-
-    # train_data.export(
-    #   export_dir=COCO_TRAIN_DIR,
-    #   dataset_type=fo.types.COCODetectionDataset,
-    # )
-    # val_data.export(
-    #   export_dir=COCO_VAL_DIR,
-    #   dataset_type=fo.types.COCODetectionDataset,
-    # )
-
-    TRAIN_DIR = os.path.join(DATA_DIR, "train")
-    VAL_DIR = os.path.join(DATA_DIR, "val")
+    TRAIN_DIR = os.path.join(self.data_dir, "train")
+    VAL_DIR = os.path.join(self.data_dir, "val")
 
     TRAIN_DATA_DIR   = os.path.join(TRAIN_DIR, "data")
     VAL_DATA_DIR     = os.path.join(VAL_DIR, "data")
@@ -62,39 +63,15 @@ class Trainer:
     VAL_LABELS_PATH   = os.path.join(VAL_DIR, "labels.json")
 
     with open(TRAIN_LABELS_PATH, "r") as f:
-      train_coco = json.load(f)
+      train = json.load(f)
     with open(VAL_LABELS_PATH, "r") as f:
-      val_coco = json.load(f)
+      val = json.load(f)
 
-    self.train_dataset = DatasetInterface(train_coco, TRAIN_DATA_DIR)
-    self.val_dataset   = DatasetInterface(val_coco,   VAL_DATA_DIR)
-    # OLD
-    # 1. Download the dataset, export it in COCO format and create initialize interface
-    # data = download_data()
-    # data.export(
-    #   export_dir="/tmp/coco",
-    #   dataset_type=fo.types.COCODetectionDataset,
-    # )
-
-    # with open(LABELS_PATH, "r") as f:
-    #   coco = json.load(f)
-
-    # self.dataset = DatasetInterface(coco, DATA_DIR)
-
-    # # 2. Create training and testing split
-    # val_len = max(1, int(len(self.dataset) * self.val_split))
-    # train_len = self.dataset.len - val_len
-
-    # generator = torch.Generator().manual_seed(self.seed)
-    # self.train_dataset, self.val_dataset = random_split(
-    #   self.dataset,
-    #   [train_len, val_len],
-    #   generator=generator
-    # )
+    self.train_dataset = DatasetInterface(train, TRAIN_DATA_DIR)
+    self.val_dataset   = DatasetInterface(val,   VAL_DATA_DIR)
 
     # 3. Set up the model
-    assert self.train_dataset.id_2_label == self.val_dataset.id_2_label, \
-      "Train and val label maps don't match — check your TARGET_CLASSES"
+    assert self.train_dataset.id_2_label == self.val_dataset.id_2_label, "Train and val label maps don't match — check your TARGET_CLASSES"
 
     # 3. Set up the model — use train_dataset arbitrarily, both are equivalent
     self.model = AutoModelForObjectDetection.from_pretrained(
@@ -105,7 +82,7 @@ class Trainer:
     )
     self.model.to(self.device)
     
-    # 4. torch DataLoader and collator
+    # 4. Create torch DataLoader and collator
     collator_fn = DetectionCollator(MODEL_NAME)
 
     self.train_loader = DataLoader(
@@ -134,21 +111,6 @@ class Trainer:
     # Fixed samples for qualitative evaluation
     self.fixed_eval_samples = self.get_fixed_samples(self.val_dataset, self.num_fixed_eval_samples)
     self.best_val_loss = float("inf")
-
-  # MOVE OUT OF CLASS MAYBE TO DATA 
-  def get_fixed_samples(self, dataset, n_samples=8, start_idx=0):
-    end_idx = min(start_idx + n_samples, len(dataset))
-    return [dataset[i] for i in range(start_idx, end_idx)]
-  
-  # MOVE OUT OF CLASS MAYBE TO DATA
-  def _move_labels_to_device(self, labels, device):
-    moved = []
-    for label_dict in labels:
-      moved_item = {
-        k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v, in label_dict.items()
-      }
-      moved.append(moved_item)
-    return moved
 
   def save_checkpoint(self, epoch, val_loss=None, is_best=False):
     ckpt_dir = self.output_dir / "checkpoints"
@@ -261,10 +223,10 @@ class Trainer:
       )
 
       loss = outputs.loss
-      loss.backward()
       self.optimizer.step()
-      self.scheduler.step()
+      loss.backward()
       self.optimizer.zero_grad()
+      self.scheduler.step()
 
       batch_size = pixel_values.size(0)
       loss_meter.update(loss.item(), batch_size)
@@ -293,20 +255,22 @@ class Trainer:
 
     epoch_start = time.time()
 
-    map = MeanAveragePrecision(box_format="xyxy", iou_type="bbox")
-
+    metric = MeanAveragePrecision(box_format="xyxy", iou_type="bbox")
     with torch.no_grad():
+      # Loop through all validation samples
       for i, batch in enumerate(self.val_loader):
         start = time.time()
 
+        # Get actual data
         pixel_values = batch["pixel_values"].to(self.device)
 
         pixel_mask = batch.get("pixel_mask")
         if pixel_mask is not None:
-            pixel_mask = pixel_mask.to(self.device)
+          pixel_mask = pixel_mask.to(self.device)
 
         labels = self._move_labels_to_device(batch["labels"], self.device)
 
+        # Generate outputs
         outputs = self.model(
           pixel_values=pixel_values,
           pixel_mask=pixel_mask,
@@ -315,65 +279,54 @@ class Trainer:
 
         loss = outputs.loss
         batch_size = pixel_values.size(0)
-
         loss_meter.update(loss.item(), batch_size)
-        iter_meter.update(time.time() - start)
 
-        # Convert model outputs to absolute-image detections for mAP.
-        # HF object detection processors expose post_process_object_detection
-        # for this step.
+        # -------------------------
+        # Build predictions for mAP
+        # -------------------------
         target_sizes = torch.stack([
-            target["orig_size"].to(self.device) for target in labels
+          target["orig_size"] for target in labels
         ])
 
-        predictions = self.train_loader.collate_fn.image_processor.post_process_object_detection(
+        predictions = self.val_loader.collate_fn.image_processor.post_process_object_detection(
           outputs,
-          threshold=0.0,
+          threshold=0.1,
           target_sizes=target_sizes,
         )
-
-        # TorchMetrics expects:
-        # pred: list[{"boxes": Tensor[N, 4], "scores": Tensor[N], "labels": Tensor[N]}]
-        # targets: list[{"boxes": Tensor[M, 4], "labels": Tensor[M]}]
 
         metric_preds = []
         metric_targets = []
 
         for pred, target in zip(predictions, labels):
-          # -------------------------
-          # Predictions (already OK)
-          # -------------------------
+          # Predictions are already xyxy absolute after post_process_object_detection
           metric_preds.append({
             "boxes": pred["boxes"].detach().cpu(),
             "scores": pred["scores"].detach().cpu(),
             "labels": pred["labels"].detach().cpu(),
           })
 
-          # -------------------------
-          # Ground truth FIX
-          # -------------------------
-          gt_boxes = target["boxes"]          # [N, 4] (cx, cy, w, h) normalized
+          # Ground truth is usually normalized cxcywh after HF image processor
+          gt_boxes = target["boxes"]
           gt_labels = target["class_labels"]
 
-          # 1. Convert cxcywh → xyxy
           gt_boxes_xyxy = self._cxcywh_to_xyxy(gt_boxes)
 
-          # 2. Scale to absolute image size
           h, w = target["orig_size"]
           scale = torch.tensor(
             [w, h, w, h],
             device=gt_boxes_xyxy.device,
-            dtype=gt_boxes_xyxy.dtype
+            dtype=gt_boxes_xyxy.dtype,
           )
           gt_boxes_xyxy = gt_boxes_xyxy * scale
 
-          # 3. Move to CPU
           metric_targets.append({
             "boxes": gt_boxes_xyxy.detach().cpu(),
             "labels": gt_labels.detach().cpu(),
           })
-        
-        map.update(metric_preds, metric_targets)
+
+        metric.update(metric_preds, metric_targets)
+
+        iter_meter.update(time.time() - start)
 
         if i % 100 == 0:
           print(
@@ -381,22 +334,22 @@ class Trainer:
             f"Loss {loss_meter.val:.3f} ({loss_meter.avg:.3f})\t"
             f"Time {iter_meter.val:.3f} ({iter_meter.avg:.3f})\t"
           )
-    
-    results = map.compute()
+
+    results = metric.compute()
 
     metrics = {
-      "val_loss": float(loss_meter.avg),
-      "mAP": float(results["map"].item()),
-      "AP50": float(results["map_50"].item()),
-      "AP75": float(results["map_75"].item()),
+        "val_loss": float(loss_meter.avg),
+        "mAP": float(results["map"].item()),
+        "AP50": float(results["map_50"].item()),
+        "AP75": float(results["map_75"].item()),
     }
 
     print(
-      f"Val completed in {(time.time() - epoch_start) / 60:.3f} min. "
-      f"Loss {metrics['val_loss']:.3f} | "
-      f"mAP {metrics['mAP']:.4f} | "
-      f"AP50 {metrics['AP50']:.4f} | "
-      f"AP75 {metrics['AP75']:.4f}"
+        f"Val completed in {(time.time() - epoch_start) / 60:.3f} min. "
+        f"Loss {metrics['val_loss']:.3f} | "
+        f"mAP {metrics['mAP']:.4f} | "
+        f"AP50 {metrics['AP50']:.4f} | "
+        f"AP75 {metrics['AP75']:.4f}"
     )
 
     return metrics
@@ -484,10 +437,9 @@ class Trainer:
       is_best = val_loss < self.best_val_loss
       if val_loss < self.best_val_loss:
         self.best_val_loss = val_loss
-      self.save_checkpoint(epoch, val_loss=val_loss, is_best=is_best)
-
-      if(epoch + 1) % self.vis_every == 0:
-        self.visualize_fixed_predictions(epoch)
+      
+      if epoch % 5 == 0:
+        self.save_checkpoint(epoch, val_loss=val_loss, is_best=is_best)
 
       print(
         f"Epoch {epoch + 1} / {self.n_epochs} done. "
