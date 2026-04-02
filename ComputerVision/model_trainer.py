@@ -47,6 +47,7 @@ class Trainer:
     self.unfreeze_epoch         = getattr(self.config.train, "unfreeze_epoch", 3)
     self.frozen                 = True
     self.device                 = device if device is not None else get_device()
+    self.output_dir             = Path(output_dir) if output_dir is not None else "./outputs"
 
     self.output_dir.mkdir(parents=True, exist_ok=True)
     (self.output_dir / "checkpoints").mkdir(parents=True, exist_ok=True)
