@@ -138,17 +138,4 @@ class DatasetInterface(Dataset):
   def rebuild_annotation_map(self, annotations: List[Dict[str, Any]]) -> None:
     self.ann_map = self._build_annotation_map(annotations)
 
-# MOVE OUT OF CLASS MAYBE TO DATA 
-def get_fixed_samples(dataset, n_samples=8, start_idx=0):
-  end_idx = min(start_idx + n_samples, len(dataset))
-  return [dataset[i] for i in range(start_idx, end_idx)]
 
-# MOVE OUT OF CLASS MAYBE TO DATA
-def _move_labels_to_device(labels, device):
-  moved = []
-  for label_dict in labels:
-    moved_item = {
-      k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v, in label_dict.items()
-    }
-    moved.append(moved_item)
-  return moved

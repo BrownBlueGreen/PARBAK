@@ -31,6 +31,21 @@ MODEL_NAME = "PekingU/rtdetr_v2_r18vd"
 #   transformer_lr: 0.0001
 #   head_lr: 0.001
 
+# MOVE OUT OF CLASS MAYBE TO DATA 
+def get_fixed_samples(dataset, n_samples=8, start_idx=0):
+  end_idx = min(start_idx + n_samples, len(dataset))
+  return [dataset[i] for i in range(start_idx, end_idx)]
+
+# MOVE OUT OF CLASS MAYBE TO DATA
+def _move_labels_to_device(labels, device):
+  moved = []
+  for label_dict in labels:
+    moved_item = {
+      k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v, in label_dict.items()
+    }
+    moved.append(moved_item)
+  return moved
+
 class Trainer:
   def __init__(self, config, output_dir=None, device=None, data_dir=None):
 
@@ -47,7 +62,7 @@ class Trainer:
     self.unfreeze_epoch         = getattr(self.config.train, "unfreeze_epoch", 3)
     self.frozen                 = True
     self.device                 = device if device is not None else get_device()
-    self.output_dir             = Path(output_dir) if output_dir is not None else "./outputs"
+    self.output_dir             = Path(output_dir) if output_dir is not None else Path("./outputs")
 
     self.output_dir.mkdir(parents=True, exist_ok=True)
     (self.output_dir / "checkpoints").mkdir(parents=True, exist_ok=True)
@@ -55,10 +70,8 @@ class Trainer:
 
     TRAIN_DIR = os.path.join(self.data_dir, "train")
     VAL_DIR = os.path.join(self.data_dir, "val")
-
     TRAIN_DATA_DIR   = os.path.join(TRAIN_DIR, "data")
     VAL_DATA_DIR     = os.path.join(VAL_DIR, "data")
-
     TRAIN_LABELS_PATH = os.path.join(TRAIN_DIR, "labels.json")
     VAL_LABELS_PATH   = os.path.join(VAL_DIR, "labels.json")
 
@@ -109,7 +122,7 @@ class Trainer:
     self.scheduler = self.build_scheduler(current_epoch=0)
 
     # Fixed samples for qualitative evaluation
-    self.fixed_eval_samples = self.get_fixed_samples(self.val_dataset, self.num_fixed_eval_samples)
+    self.fixed_eval_samples = get_fixed_samples(self.val_dataset, self.num_fixed_eval_samples)
     self.best_val_loss = float("inf")
 
   def save_checkpoint(self, epoch, val_loss=None, is_best=False):
@@ -214,7 +227,7 @@ class Trainer:
       if pixel_mask is not None:
         pixel_mask = pixel_mask.to(self.device)
 
-      labels = self._move_labels_to_device(batch["labels"], self.device)
+      labels = _move_labels_to_device(batch["labels"], self.device)
 
       outputs = self.model(
         pixel_values = pixel_values,
@@ -268,7 +281,7 @@ class Trainer:
         if pixel_mask is not None:
           pixel_mask = pixel_mask.to(self.device)
 
-        labels = self._move_labels_to_device(batch["labels"], self.device)
+        labels = _move_labels_to_device(batch["labels"], self.device)
 
         # Generate outputs
         outputs = self.model(
@@ -502,7 +515,7 @@ class Trainer:
     if pixel_mask is not None:
         pixel_mask = pixel_mask.to(self.device)
 
-    labels = self._move_labels_to_device(batch["labels"], self.device)
+    labels = _move_labels_to_device(batch["labels"], self.device)
 
     with torch.no_grad():
         outputs = self.model(
