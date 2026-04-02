@@ -1,5 +1,6 @@
 data:
   data_directory: "./data"
+  output_directory: "./output"
 train:
   batch_size: 16
   n_epochs: 30
@@ -9,9 +10,7 @@ train:
   checkpoint: 10
   vis: 10
   num_fixed_eval_samples: 4
-diffusion:
-  time_dim: 128
-  timesteps: 500
+  unfreeze_epoch: 3
 optimizer:
   type: "adamw" # adamw or sgd
   weight_decay: 0.0001 #0.001
