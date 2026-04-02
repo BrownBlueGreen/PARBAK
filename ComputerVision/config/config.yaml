@@ -1,6 +1,5 @@
 data:
   data_directory: "./data"
-  output_directory: "./output"
 train:
   batch_size: 16
   n_epochs: 30
