@@ -236,9 +236,9 @@ class Trainer:
       )
 
       loss = outputs.loss
-      self.optimizer.step()
-      loss.backward()
       self.optimizer.zero_grad()
+      loss.backward()
+      self.optimizer.step()
       self.scheduler.step()
 
       batch_size = pixel_values.size(0)
