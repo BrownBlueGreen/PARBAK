@@ -1,4 +1,5 @@
 import fiftyone as fo, math, json, os, random, time, torch
+from augmentation import build_train_augmentations, build_val_augmentations
 from data_interface import DatasetInterface
 from detection_collator import DetectionCollator
 from pathlib import Path
@@ -61,8 +62,20 @@ class Trainer:
     with open(VAL_LABELS_PATH, "r") as f:
       val = json.load(f)
 
-    self.train_dataset = DatasetInterface(train, TRAIN_DATA_DIR)
-    self.val_dataset   = DatasetInterface(val,   VAL_DATA_DIR)
+    # self.train_dataset = DatasetInterface(train, TRAIN_DATA_DIR)
+    # self.val_dataset   = DatasetInterface(val,   VAL_DATA_DIR)
+
+    train_dataset = DatasetInterface(
+      coco=train_coco,
+      img_dir=TRAIN_DATA_DIR,
+      transforms=build_train_augmentations(image_size=640),
+    )
+
+    val_dataset = DatasetInterface(
+      coco=val_coco,
+      img_dir=VAL_DATA_DIR,
+      transforms=build_val_augmentations(),
+    )
 
     # 3. Set up the model
     assert self.train_dataset.id_2_label == self.val_dataset.id_2_label, "Train and val label maps don't match — check your TARGET_CLASSES"

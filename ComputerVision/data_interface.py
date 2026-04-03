@@ -1,12 +1,20 @@
 import os
 from collections import defaultdict
 from typing import Any, Optional
+
+import numpy as np
+import albumentations as A
 from PIL import Image
 from torch.utils.data import Dataset
 
 
 class DatasetInterface(Dataset):
-  def __init__(self, coco: dict[str, Any], img_dir: str):
+  def __init__(
+      self,
+      coco: dict[str, Any],
+      img_dir: str,
+      transforms: Optional[A.Compose] = None,
+  ):
     if "images" not in coco:
         raise ValueError("COCO data is missing required key: 'images'")
     if "categories" not in coco:
@@ -15,6 +23,7 @@ class DatasetInterface(Dataset):
     self.images: list[dict[str, Any]] = coco["images"]
     self.image_dir: str = img_dir
     self.categories: list[dict[str, Any]] = sorted(coco["categories"], key=lambda c: c["id"])
+    self.transforms = transforms
 
     raw_annotations = coco.get("annotations", [])
 
@@ -68,12 +77,87 @@ class DatasetInterface(Dataset):
 
     image = Image.open(image_path).convert("RGB")
 
+    annotations = self.get_remapped_annotations_by_image_id(image_id)
+
+    if self.transforms is not None:
+      image, annotations = self._apply_transforms(
+        image=image,
+        image_id=image_id,
+        annotations=annotations,
+      )
+
     target = {
       "image_id": image_id,
-      "annotations": self.get_remapped_annotations_by_image_id(image_id),
+      "annotations": annotations,
     }
 
     return image, target
+
+  def _apply_transforms(
+      self,
+      image: Image.Image,
+      image_id: int,
+      annotations: list[dict[str, Any]],
+  ) -> tuple[Image.Image, list[dict[str, Any]]]:
+    image_np = np.array(image)
+
+    bboxes: list[list[float]] = []
+    class_labels: list[int] = []
+    ann_ids: list[int | None] = []
+    iscrowd: list[int] = []
+
+    for ann in annotations:
+      bbox = ann.get("bbox")
+      if bbox is None or len(bbox) != 4:
+        continue
+
+      x, y, w, h = bbox
+      if w <= 0 or h <= 0:
+        continue
+
+      bboxes.append([float(x), float(y), float(w), float(h)])
+      class_labels.append(int(ann["category_id"]))
+      ann_ids.append(ann.get("id"))
+      iscrowd.append(int(ann.get("iscrowd", 0)))
+
+    transformed = self.transforms(
+      image=image_np,
+      bboxes=bboxes,
+      class_labels=class_labels,
+      ann_ids=ann_ids,
+      iscrowd=iscrowd,
+    )
+
+    transformed_image = Image.fromarray(transformed["image"])
+
+    out_bboxes = transformed["bboxes"]
+    out_labels = transformed["class_labels"]
+    out_ann_ids = transformed["ann_ids"]
+    out_iscrowd = transformed["iscrowd"]
+
+    transformed_annotations: list[dict[str, Any]] = []
+
+    for bbox, class_label, ann_id, crowd in zip(
+      out_bboxes, out_labels, out_ann_ids, out_iscrowd
+    ):
+      x, y, w, h = bbox
+      if w <= 0 or h <= 0:
+        continue
+
+      new_ann = {
+        "image_id": image_id,
+        "category_id": int(class_label),
+        "bbox": [float(x), float(y), float(w), float(h)],
+        "area": float(w * h),
+        "iscrowd": int(crowd),
+      }
+
+      if ann_id is not None:
+        new_ann["id"] = ann_id
+
+      transformed_annotations.append(new_ann)
+
+    return transformed_image, transformed_annotations
 
   @staticmethod
   def _build_annotation_map(annotations: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
@@ -137,7 +221,7 @@ class DatasetInterface(Dataset):
       orig_cat_id = ann["category_id"]
       if orig_cat_id not in self.orig_id_to_train_id:
         raise ValueError(
-            f"Unknown category_id {orig_cat_id} in annotation for image_id {image_id}"
+          f"Unknown category_id {orig_cat_id} in annotation for image_id {image_id}"
         )
 
       remapped_ann = ann.copy()
@@ -146,7 +230,6 @@ class DatasetInterface(Dataset):
 
     return remapped_annotations
 
-  # Backwards-compatible aliases, but now explicit behavior
   def get_annotations_by_idx(self, idx: int) -> list[dict[str, Any]]:
     return self.get_remapped_annotations_by_idx(idx)
 
@@ -208,10 +291,12 @@ class DatasetInterface(Dataset):
   def set_img_dir(self, img_dir: str) -> None:
     self.image_dir = img_dir
 
+  def set_transforms(self, transforms: Optional[A.Compose]) -> None:
+    self.transforms = transforms
+
   def rebuild_annotation_map(self, annotations: list[dict[str, Any]]) -> None:
     new_ann_map = self._build_annotation_map(annotations)
 
-    # Validate against existing image/category mappings before committing
     old_ann_map = self.ann_map
     self.ann_map = new_ann_map
     try:

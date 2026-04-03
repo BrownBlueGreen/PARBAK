@@ -4,7 +4,7 @@ net:
   model_type: "yolox"
 train:
   batch_size: 16
-  n_epochs: 30
+  n_epochs: 40
   num_workers: 1 # change this based on number of cores on your CPU. 4 is sufficient for 1 gpu. If unsure leave at 1.
   val_split: 0.2
   seed: 42
@@ -15,6 +15,6 @@ train:
 optimizer:
   type: "adamw" # adamw or sgd
   weight_decay: 0.0001 #0.001
-  backbone_lr: 0.0001
-  transformer_lr: 0.0001
+  backbone_lr: 0.00007
+  transformer_lr: 0.0007
   head_lr: 0.0001
