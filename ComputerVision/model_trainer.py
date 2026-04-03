@@ -11,26 +11,6 @@ from transformers import AutoModelForObjectDetection
 
 MODEL_NAME = "PekingU/rtdetr_v2_r18vd"
 
-# data:
-#   data_directory: "./data"
-#   output_directory: "./output"
-# train:
-#   batch_size: 16
-#   n_epochs: 30
-#   num_workers: 1 # change this based on number of cores on your CPU. 4 is sufficient for 1 gpu. If unsure leave at 1.
-#   val_split: 0.2
-#   seed: 42
-#   checkpoint: 10
-#   vis: 10
-#   num_fixed_eval_samples: 4
-#   unfreeze_epoch: 3
-# optimizer:
-#   type: "adamw" # adamw or sgd
-#   weight_decay: 0.0001 #0.001
-#   backbone_lr: 0.0001
-#   transformer_lr: 0.0001
-#   head_lr: 0.001
-
 # MOVE OUT OF CLASS MAYBE TO DATA 
 def get_fixed_samples(dataset, n_samples=8, start_idx=0):
   end_idx = min(start_idx + n_samples, len(dataset))
@@ -51,6 +31,7 @@ class Trainer:
 
     self.config                 = config
     self.data_dir               = data_dir if data_dir is not None else self.config.data.data_directory
+    self.model_type = self.config.model.type  # "rtdetr" or "yolox"
     self.batch_size             = getattr(self.config.train, "batch_size", 1)
     self.n_epochs               = getattr(self.config.train, "n_epochs", 1)
     self.num_workers            = getattr(self.config.train, "num_workers", 1)
@@ -193,26 +174,6 @@ class Trainer:
     epoch_start = time.time()
 
     all_ids = set()
-
-    if debug:
-      for img in self.train_dataset.images:
-        anns = self.train_dataset.ann_map.get(img["id"], [])
-        for ann in anns:
-          all_ids.add(ann["category_id"])
-
-      print("min label:", min(all_ids))
-      print("max label:", max(all_ids))
-      print("num unique labels:", len(all_ids))
-      print("sorted labels:", sorted(all_ids))
-      for i, batch in enumerate(self.train_loader):
-        # DEBUG — remove after fixing
-        print("pixel_values shape:", batch["pixel_values"].shape)
-        for j, label in enumerate(batch["labels"]):
-            print(f"  label[{j}] keys:", label.keys())
-            for k, v in label.items():
-                if isinstance(v, torch.Tensor):
-                    print(f"    {k}: shape={v.shape}, dtype={v.dtype}, min={v.min():.3f}, max={v.max():.3f}")
-        break  # only check first batch
 
     if self.frozen and (epoch >= self.unfreeze_epoch):
       self.unfreeze_all()
@@ -660,12 +621,12 @@ class Trainer:
     if self.frozen and self.unfreeze_epoch > 0:
       phase_epochs = min(self.unfreeze_epoch, self.n_epochs)
       total_steps = max(1, steps_per_epoch * phase_epochs)
-      warmup_steps = int(0.01 * total_steps)
+      warmup_steps = int(0.05 * total_steps)
     
     else:
       remaining_epochs = max(0, self.n_epochs - current_epoch)
       total_steps = max(1, steps_per_epoch * remaining_epochs)
-      warmup_steps = int(0.01 * total_steps)
+      warmup_steps = int(0.05 * total_steps)
     
     return self.build_warmup_cosine_scheduler(
       warmup_steps=warmup_steps,
