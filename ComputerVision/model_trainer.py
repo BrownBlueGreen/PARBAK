@@ -31,7 +31,7 @@ class Trainer:
   def __init__(self, config, output_dir=None, device=None, data_dir=None):
     self.config = config
     self.data_dir = data_dir if data_dir is not None else self.config.data.data_directory
-    self.model_type = getattr(self.config.model, "type", "rtdetr")
+    # self.model_type = getattr(self.config.model, "type", "rtdetr")
 
     self.batch_size = getattr(self.config.train, "batch_size", 1)
     self.n_epochs = getattr(self.config.train, "n_epochs", 1)

@@ -1,7 +1,5 @@
 data:
   data_directory: "./data"
-net:
-  model_type: "yolox"
 train:
   batch_size: 16
   n_epochs: 40
@@ -12,6 +10,8 @@ train:
   vis: 10
   num_fixed_eval_samples: 4
   unfreeze_epoch: 2
+  grad_clip_norm: 1.0
+  use_amp: True
 optimizer:
   type: "adamw" # adamw or sgd
   weight_decay: 0.0001 #0.001
