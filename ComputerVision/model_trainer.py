@@ -12,75 +12,79 @@ from transformers import AutoModelForObjectDetection
 
 MODEL_NAME = "PekingU/rtdetr_v2_r18vd"
 
-# MOVE OUT OF CLASS MAYBE TO DATA 
-def get_fixed_samples(dataset, n_samples=8, start_idx=0):
-  end_idx = min(start_idx + n_samples, len(dataset))
-  return [dataset[i] for i in range(start_idx, end_idx)]
+def get_fixed_sample_indices(dataset, n_samples=8, start_idx=0):
+    end_idx = min(start_idx + n_samples, len(dataset))
+    return list(range(start_idx, end_idx))
 
-# MOVE OUT OF CLASS MAYBE TO DATA
+
 def _move_labels_to_device(labels, device):
-  moved = []
-  for label_dict in labels:
-    moved_item = {
-      k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v, in label_dict.items()
-    }
-    moved.append(moved_item)
-  return moved
-
+    moved = []
+    for label_dict in labels:
+        moved_item = {
+            k: v.to(device) if isinstance(v, torch.Tensor) else v
+            for k, v in label_dict.items()
+        }
+        moved.append(moved_item)
+    return moved
+        
 class Trainer:
   def __init__(self, config, output_dir=None, device=None, data_dir=None):
+    self.config = config
+    self.data_dir = data_dir if data_dir is not None else self.config.data.data_directory
+    self.model_type = getattr(self.config.model, "type", "rtdetr")
 
-    self.config                 = config
-    self.data_dir               = data_dir if data_dir is not None else self.config.data.data_directory
-    self.model_type = self.config.model.type  # "rtdetr" or "yolox"
-    self.batch_size             = getattr(self.config.train, "batch_size", 1)
-    self.n_epochs               = getattr(self.config.train, "n_epochs", 1)
-    self.num_workers            = getattr(self.config.train, "num_workers", 1)
-    self.val_split              = getattr(self.config.train, "val_split", 0.2)
-    self.seed                   = getattr(self.config.train, "seed", 42)
-    self.checkpoint             = getattr(self.config.train, "checkpoint", 1)
-    self.vis_every              = getattr(self.config.train, "vis", 10)
+    self.batch_size = getattr(self.config.train, "batch_size", 1)
+    self.n_epochs = getattr(self.config.train, "n_epochs", 1)
+    self.num_workers = getattr(self.config.train, "num_workers", 1)
+    self.seed = getattr(self.config.train, "seed", 42)
+    self.checkpoint_every = max(1, getattr(self.config.train, "checkpoint", 1))
+    self.vis_every = max(1, getattr(self.config.train, "vis", 10))
     self.num_fixed_eval_samples = getattr(self.config.train, "num_fixed_eval_samples", 4)
-    self.unfreeze_epoch         = getattr(self.config.train, "unfreeze_epoch", 3)
-    self.frozen                 = True
-    self.device                 = device if device is not None else get_device()
-    self.output_dir             = Path(output_dir) if output_dir is not None else Path("./outputs")
+    self.unfreeze_epoch = getattr(self.config.train, "unfreeze_epoch", 3)
+
+    self.grad_clip_norm = getattr(self.config.train, "grad_clip_norm", 1.0)
+    self.use_amp = bool(getattr(self.config.train, "use_amp", True))
+
+    self.frozen = True
+    self.device = device if device is not None else get_device()
+    self.output_dir = Path(output_dir) if output_dir is not None else Path("./outputs")
 
     self.output_dir.mkdir(parents=True, exist_ok=True)
     (self.output_dir / "checkpoints").mkdir(parents=True, exist_ok=True)
     (self.output_dir / "visualizations").mkdir(parents=True, exist_ok=True)
 
-    TRAIN_DIR = os.path.join(self.data_dir, "train")
-    VAL_DIR = os.path.join(self.data_dir, "val")
-    TRAIN_DATA_DIR   = os.path.join(TRAIN_DIR, "data")
-    VAL_DATA_DIR     = os.path.join(VAL_DIR, "data")
-    TRAIN_LABELS_PATH = os.path.join(TRAIN_DIR, "labels.json")
-    VAL_LABELS_PATH   = os.path.join(VAL_DIR, "labels.json")
+    self.amp_enabled = self.use_amp and str(self.device).startswith("cuda")
+    self.scaler = torch.amp.GradScaler("cuda", enabled=self.amp_enabled)
 
-    with open(TRAIN_LABELS_PATH, "r") as f:
-      train = json.load(f)
-    with open(VAL_LABELS_PATH, "r") as f:
-      val = json.load(f)
+    train_dir = os.path.join(self.data_dir, "train")
+    val_dir = os.path.join(self.data_dir, "val")
 
-    # self.train_dataset = DatasetInterface(train, TRAIN_DATA_DIR)
-    # self.val_dataset   = DatasetInterface(val,   VAL_DATA_DIR)
+    train_data_dir = os.path.join(train_dir, "data")
+    val_data_dir = os.path.join(val_dir, "data")
+    train_labels_path = os.path.join(train_dir, "labels.json")
+    val_labels_path = os.path.join(val_dir, "labels.json")
 
-    train_dataset = DatasetInterface(
-      coco=train_coco,
-      img_dir=TRAIN_DATA_DIR,
+    with open(train_labels_path, "r") as f:
+        train = json.load(f)
+    with open(val_labels_path, "r") as f:
+        val = json.load(f)
+
+    self.train_dataset = DatasetInterface(
+      coco=train,
+      img_dir=train_data_dir,
       transforms=build_train_augmentations(image_size=640),
     )
 
-    val_dataset = DatasetInterface(
-      coco=val_coco,
-      img_dir=VAL_DATA_DIR,
+    self.val_dataset = DatasetInterface(
+      coco=val,
+      img_dir=val_data_dir,
       transforms=build_val_augmentations(),
     )
 
-    # 3. Set up the model
-    assert self.train_dataset.id_2_label == self.val_dataset.id_2_label, "Train and val label maps don't match — check your TARGET_CLASSES"
+    assert self.train_dataset.id_2_label == self.val_dataset.id_2_label, (
+      "Train and val label maps don't match — check your TARGET_CLASSES"
+    )
 
-    # 3. Set up the model — use train_dataset arbitrarily, both are equivalent
     self.model = AutoModelForObjectDetection.from_pretrained(
       MODEL_NAME,
       id2label=self.train_dataset.id_2_label,
@@ -88,69 +92,76 @@ class Trainer:
       ignore_mismatched_sizes=True,
     )
     self.model.to(self.device)
-    
-    # 4. Create torch DataLoader and collator
+
     collator_fn = DetectionCollator(MODEL_NAME)
 
     self.train_loader = DataLoader(
-      self.train_dataset, 
+      self.train_dataset,
       batch_size=self.batch_size,
       shuffle=True,
       num_workers=self.num_workers,
       collate_fn=collator_fn,
-      pin_memory = str(self.device).startswith("cuda"),
+      pin_memory=str(self.device).startswith("cuda"),
     )
 
     self.val_loader = DataLoader(
-      self.val_dataset, 
+      self.val_dataset,
       batch_size=self.batch_size,
       shuffle=False,
       num_workers=self.num_workers,
       collate_fn=collator_fn,
-      pin_memory = str(self.device).startswith("cuda"),
+      pin_memory=str(self.device).startswith("cuda"),
     )
-    
-    # 5. Optimizer
+
     self.freeze_backbone()
     self.optimizer = self.build_optimizer()
     self.scheduler = self.build_scheduler(current_epoch=0)
 
-    # Fixed samples for qualitative evaluation
-    self.fixed_eval_samples = get_fixed_samples(self.val_dataset, self.num_fixed_eval_samples)
-    self.best_val_loss = float("inf")
+    self.fixed_eval_indices = get_fixed_sample_indices(
+      self.val_dataset,
+      n_samples=self.num_fixed_eval_samples,
+    )
 
-  def save_checkpoint(self, epoch, val_loss=None, is_best=False):
+    self.best_val_loss = float("inf")
+    self.best_map = float("-inf")
+
+  def save_checkpoint(self, epoch, metrics=None, is_best_map=False):
     ckpt_dir = self.output_dir / "checkpoints"
+    metrics = metrics or {}
+
     checkpoint = {
       "epoch": epoch,
       "model_state_dict": self.model.state_dict(),
       "optimizer_state_dict": self.optimizer.state_dict(),
       "scheduler_state_dict": self.scheduler.state_dict(),
       "best_val_loss": self.best_val_loss,
+      "best_map": self.best_map,
       "frozen": self.frozen,
       "unfreeze_epoch": self.unfreeze_epoch,
-      "val_loss": val_loss,
+      "metrics": metrics,
       "id_2_label": self.train_dataset.id_2_label,
       "label_2_id": self.train_dataset.label_2_id,
       "model_name": MODEL_NAME,
     }
-  
+
+    if self.amp_enabled:
+      checkpoint["sacler_state_dict"] = self.scaler.state_dict()
+
     latest_path = ckpt_dir / f"epoch_{epoch + 1}.pt"
     torch.save(checkpoint, latest_path)
 
-    # Also save hugging-face style weights/config just in case 
     hf_dir = ckpt_dir / f"hf_epoch_{epoch + 1}"
     hf_dir.mkdir(parents=True, exist_ok=True)
     self.model.save_pretrained(hf_dir)
 
-    if is_best:
-      best_path = ckpt_dir / "best.pt"
+    if is_best_map:
+      best_path = ckpt_dir / "best_map.pt"
       torch.save(checkpoint, best_path)
-    
-      best_hf_dir = ckpt_dir / "best_hf"
+
+      best_hf_dir = ckpt_dir / "best_map_hf"
       best_hf_dir.mkdir(parents=True, exist_ok=True)
       self.model.save_pretrained(best_hf_dir)
-    
+
     print(f"checkpoint saved: {latest_path}")
 
   def load_checkpoint(self, checkpoint_path):
@@ -173,22 +184,24 @@ class Trainer:
 
     self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+    if "scaler_state_dict" in checkpoint and self.amp_enabled:
+      self.scaler.load_state_dict(checkpoint["scaler_state_dict"])
 
     self.best_val_loss = checkpoint.get("best_val_loss", float("inf"))
-    print(f"Loaded checkpoint from {checkpoint_path}")
-    return saved_epoch
+    self.best_map = checkpoint.get("best_map", float("-inf"))
 
-  def train_one_epoch(self, epoch, debug=False):
+    print(f"Loaded checkpoint from {checkpoint_path}")
+    return next_epoch
+
+  def train_one_epoch(self, epoch):
     self.model.train()
 
     loss_meter = AverageMeter()
     iter_meter = AverageMeter()
-
     epoch_start = time.time()
 
-    all_ids = set()
-
-    if self.frozen and (epoch >= self.unfreeze_epoch):
+    if self.frozen and epoch >= self.unfreeze_epoch:
+      print(f"Unfreezing full model at epoch {epoch + 1}")
       self.unfreeze_all()
       self.frozen = False
       self.optimizer = self.build_optimizer()
@@ -196,6 +209,7 @@ class Trainer:
 
     for i, batch in enumerate(self.train_loader):
       start = time.time()
+
       pixel_values = batch["pixel_values"].to(self.device)
       pixel_mask = batch.get("pixel_mask")
       if pixel_mask is not None:
@@ -203,16 +217,27 @@ class Trainer:
 
       labels = _move_labels_to_device(batch["labels"], self.device)
 
-      outputs = self.model(
-        pixel_values = pixel_values,
-        pixel_mask = pixel_mask,
-        labels = labels,
-      )
+      self.optimizer.zero_grad(set_to_none=True)
 
-      loss = outputs.loss
-      self.optimizer.zero_grad()
-      loss.backward()
-      self.optimizer.step()
+      with torch.amp.autocast("cuda", enabled=self.amp_enabled):
+        outputs = self.model(
+          pixel_values=pixel_values,
+          pixel_mask=pixel_mask,
+          labels=labels,
+        )
+        loss = outputs.loss
+
+      if self.amp_enabled:
+        self.scaler.scale(loss).backward()
+        self.scaler.unscale_(self.optimizer)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+      else:
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
+        self.optimizer.step()
+
       self.scheduler.step()
 
       batch_size = pixel_values.size(0)
@@ -220,13 +245,15 @@ class Trainer:
       iter_meter.update(time.time() - start)
 
       if i % 100 == 0:
+        lrs = [group["lr"] for group in self.optimizer.param_groups]
         print(
-          f"Train Epoch: [{epoch + 1}/{self.n_epochs}]"
-          f"[{i}/{len(self.train_loader)}]\t"
-          f"Loss {loss_meter.val:.4f} ({loss_meter.avg:.4f})\t"
-          f"Time {iter_meter.val:.3f} ({iter_meter.avg:.3f})"
+          f"Train Epoch: [{epoch + 1}/{self.n_epochs}] "
+          f"[{i}/{len(self.train_loader)}] "
+          f"Loss {loss_meter.val:.4f} ({loss_meter.avg:.4f}) "
+          f"Time {iter_meter.val:.3f} ({iter_meter.avg:.3f}) "
+          f"LRs {[f'{lr:.2e}' for lr in lrs]}"
         )
-    
+
     print(
       f"Train epoch {epoch + 1} completed in "
       f"{(time.time() - epoch_start) / 60:.3f} min. "
@@ -239,41 +266,33 @@ class Trainer:
 
     loss_meter = AverageMeter()
     iter_meter = AverageMeter()
-
     epoch_start = time.time()
 
     metric = MeanAveragePrecision(box_format="xyxy", iou_type="bbox")
+
     with torch.no_grad():
-      # Loop through all validation samples
       for i, batch in enumerate(self.val_loader):
         start = time.time()
 
-        # Get actual data
         pixel_values = batch["pixel_values"].to(self.device)
-
         pixel_mask = batch.get("pixel_mask")
         if pixel_mask is not None:
           pixel_mask = pixel_mask.to(self.device)
 
         labels = _move_labels_to_device(batch["labels"], self.device)
 
-        # Generate outputs
-        outputs = self.model(
-          pixel_values=pixel_values,
-          pixel_mask=pixel_mask,
-          labels=labels,
-        )
+        with torch.amp.autocast("cuda", enabled=self.amp_enabled):
+          outputs = self.model(
+            pixel_values=pixel_values,
+            pixel_mask=pixel_mask,
+            labels=labels,
+          )
+          loss = outputs.loss
 
-        loss = outputs.loss
         batch_size = pixel_values.size(0)
         loss_meter.update(loss.item(), batch_size)
 
-        # -------------------------
-        # Build predictions for mAP
-        # -------------------------
-        target_sizes = torch.stack([
-          target["orig_size"] for target in labels
-        ])
+        target_sizes = torch.stack([target["orig_size"] for target in labels])
 
         predictions = self.val_loader.collate_fn.image_processor.post_process_object_detection(
           outputs,
@@ -285,14 +304,12 @@ class Trainer:
         metric_targets = []
 
         for pred, target in zip(predictions, labels):
-          # Predictions are already xyxy absolute after post_process_object_detection
           metric_preds.append({
             "boxes": pred["boxes"].detach().cpu(),
             "scores": pred["scores"].detach().cpu(),
             "labels": pred["labels"].detach().cpu(),
           })
 
-          # Ground truth is usually normalized cxcywh after HF image processor
           gt_boxes = target["boxes"]
           gt_labels = target["class_labels"]
 
@@ -312,31 +329,31 @@ class Trainer:
           })
 
         metric.update(metric_preds, metric_targets)
-
         iter_meter.update(time.time() - start)
 
         if i % 100 == 0:
           print(
-            f"Val Epoch: [{epoch + 1}][{i}/{len(self.val_loader)}]\t"
-            f"Loss {loss_meter.val:.3f} ({loss_meter.avg:.3f})\t"
-            f"Time {iter_meter.val:.3f} ({iter_meter.avg:.3f})\t"
+            f"Val Epoch: [{epoch + 1}/{len(self.n_epochs)}] "
+            f"[{i}/{len(self.val_loader)}] "
+            f"Loss {loss_meter.val:.3f} ({loss_meter.avg:.3f}) "
+            f"Time {iter_meter.val:.3f} ({iter_meter.avg:.3f})"
           )
 
     results = metric.compute()
 
     metrics = {
-        "val_loss": float(loss_meter.avg),
-        "mAP": float(results["map"].item()),
-        "AP50": float(results["map_50"].item()),
-        "AP75": float(results["map_75"].item()),
+      "val_loss": float(loss_meter.avg),
+      "mAP": float(results["map"].item()),
+      "AP50": float(results["map_50"].item()),
+      "AP75": float(results["map_75"].item()),
     }
 
     print(
-        f"Val completed in {(time.time() - epoch_start) / 60:.3f} min. "
-        f"Loss {metrics['val_loss']:.3f} | "
-        f"mAP {metrics['mAP']:.4f} | "
-        f"AP50 {metrics['AP50']:.4f} | "
-        f"AP75 {metrics['AP75']:.4f}"
+      f"Val completed in {(time.time() - epoch_start) / 60:.3f} min. "
+      f"Loss {metrics['val_loss']:.3f} | "
+      f"mAP {metrics['mAP']:.4f} | "
+      f"AP50 {metrics['AP50']:.4f} | "
+      f"AP75 {metrics['AP75']:.4f}"
     )
 
     return metrics
@@ -346,40 +363,40 @@ class Trainer:
 
     vis_dir = self.output_dir / "visualizations"
     font = ImageFont.load_default()
+    collator = self.val_loader.collate_fn
+    processor = getattr(collator, "image_processor", None)
 
     with torch.no_grad():
-      for idx, (image, target) in enumerate(self.fixed_eval_samples):
-        # Build a single-item batch using the collator
-        batch = self.train_loader.collate_fn([(image, target)])
+      for idx, dataset_idx in enumerate(self.fixed_eval_indices):
+        image, target = self.val_dataset[dataset_idx]
+        batch = collator([(image, target)])
 
         pixel_values = batch["pixel_values"].to(self.device)
         pixel_mask = batch.get("pixel_mask")
         if pixel_mask is not None:
-          pixel_mask = pixel_mask.to(self.device)
-        
-        outputs = self.model(
-          pixel_values=pixel_values,
-          pixel_mask=pixel_mask,
-        )
+            pixel_mask = pixel_mask.to(self.device)
 
-        # Convert tensor/PIL image for drawing
+        with torch.amp.autocast("cuda", enabled=self.amp_enabled):
+            outputs = self.model(
+                pixel_values=pixel_values,
+                pixel_mask=pixel_mask,
+            )
+
         if isinstance(image, torch.Tensor):
           img = self.tensor_to_pil(image)
         elif isinstance(image, Image.Image):
           img = image.copy()
         else:
           raise TypeError(f"Unsupported image type: {type(image)}")
-        
+
         draw = ImageDraw.Draw(img)
 
-        # Process with collator post processor
-        processor = getattr(self.train_loader.collate_fn, "image_processor", None)
         if processor is not None and hasattr(processor, "post_process_object_detection"):
           target_sizes = torch.tensor([[img.height, img.width]], device=self.device)
           results = processor.post_process_object_detection(
             outputs,
             threshold=threshold,
-            target_sizes=target_sizes
+            target_sizes=target_sizes,
           )[0]
 
           boxes = results["boxes"].detach().cpu()
@@ -388,15 +405,15 @@ class Trainer:
 
           for box, score, label in zip(boxes, scores, labels):
             x0, y0, x1, y1 = box.tolist()
-            class_name = self.train_dataset.id_2_label.get(int(label), str(int(label)))
+            class_name = self.val_dataset.id_2_label.get(int(label), str(int(label)))
             text = f"{class_name}: {float(score):.2f}"
 
             draw.rectangle([x0, y0, x1, y1], outline="red", width=3)
-            draw.text((x0, max(0, y0-12)), text, fill="red", font=font)
+            draw.text((x0, max(0, y0 - 12)), text, fill="red", font=font)
 
         save_path = vis_dir / f"epoch_{epoch + 1}_sample_{idx}.png"
         img.save(save_path)
-      
+
     print(f"Saved qualitative predictions for epoch {epoch + 1}")
 
   @staticmethod
@@ -414,24 +431,37 @@ class Trainer:
     image = image.permute(1, 2, 0).numpy()
     return Image.fromarray(image)
   
-  def fit(self, start_epoch = 0):
+  def fit(self, start_epoch=0):
     print(f"Training on device: {self.device}")
+    print(f"AMP enabled: {self.amp_enabled}")
 
     for epoch in range(start_epoch, self.n_epochs):
       train_loss = self.train_one_epoch(epoch)
       metrics = self.evaluate(epoch)
+
       val_loss = metrics["val_loss"]
-      is_best = val_loss < self.best_val_loss
+      current_map = metrics["mAP"]
+
       if val_loss < self.best_val_loss:
         self.best_val_loss = val_loss
-      
-      if epoch % 5 == 0:
-        self.save_checkpoint(epoch, val_loss=val_loss, is_best=is_best)
+
+      is_best_map = current_map > self.best_map
+      if is_best_map:
+        self.best_map = current_map
+
+      if ((epoch + 1) % self.checkpoint_every == 0) or is_best_map:
+        self.save_checkpoint(epoch, metrics=metrics, is_best_map=is_best_map)
+
+      if ((epoch + 1) % self.vis_every == 0):
+        self.visualize_fixed_predictions(epoch)
 
       print(
-        f"Epoch {epoch + 1} / {self.n_epochs} done. "
-        f"Train loss: {train_loss:.4f}, Val loss: {val_loss:.4f}, "
-        f"Best val loss: {self.best_val_loss:.4f}"
+        f"Epoch {epoch + 1}/{self.n_epochs} done. "
+        f"Train loss: {train_loss:.4f}, "
+        f"Val loss: {val_loss:.4f}, "
+        f"mAP: {current_map:.4f}, "
+        f"Best val loss: {self.best_val_loss:.4f}, "
+        f"Best mAP: {self.best_map:.4f}"
       )
 
   def _cxcywh_to_xyxy(self, boxes: torch.Tensor) -> torch.Tensor:
@@ -593,9 +623,9 @@ class Trainer:
     new_head_params = []
 
     new_head_prefixes = [
-        "model.denoising_class_embed",
-        "model.enc_score_head",
-        "model.decoder.class_embed",
+      "model.denoising_class_embed",
+      "model.enc_score_head",
+      "model.decoder.class_embed",
     ]
 
     for name, param in self.model.named_parameters():
@@ -609,15 +639,27 @@ class Trainer:
       else:
         pretrained_other_params.append(param)
 
-    optimizer = torch.optim.AdamW(
-      [
-        {"params": backbone_params, "lr": self.config.optimizer.backbone_lr},
-        {"params": pretrained_other_params, "lr": self.config.optimizer.transformer_lr},
-        {"params": new_head_params, "lr": self.config.optimizer.head_lr},
-      ],
+    param_groups = []
+    if backbone_params:
+      param_groups.append({
+        "params": backbone_params,
+        "lr": self.config.optimizer.backbone_lr,
+      })
+    if pretrained_other_params:
+      param_groups.append({
+        "params": pretrained_other_params,
+        "lr": self.config.optimizer.transformer_lr,
+      })
+    if new_head_params:
+      param_groups.append({
+        "params": new_head_params,
+        "lr": self.config.optimizer.head_lr,
+      })
+
+    return torch.optim.AdamW(
+      param_groups,
       weight_decay=self.config.optimizer.weight_decay,
     )
-    return optimizer
 
   def freeze_backbone(self):
     for name, param in self.model.named_parameters():
@@ -634,16 +676,14 @@ class Trainer:
     if self.frozen and self.unfreeze_epoch > 0:
       phase_epochs = min(self.unfreeze_epoch, self.n_epochs)
       total_steps = max(1, steps_per_epoch * phase_epochs)
-      warmup_steps = int(0.05 * total_steps)
-    
     else:
-      remaining_epochs = max(0, self.n_epochs - current_epoch)
+      remaining_epochs = max(1, self.n_epochs - current_epoch)
       total_steps = max(1, steps_per_epoch * remaining_epochs)
-      warmup_steps = int(0.05 * total_steps)
-    
+
+    warmup_steps = int(0.05 * total_steps)
     return self.build_warmup_cosine_scheduler(
       warmup_steps=warmup_steps,
-      total_steps=total_steps
+      total_steps=total_steps,
     )
 
   def build_warmup_cosine_scheduler(self, warmup_steps, total_steps):
@@ -651,10 +691,14 @@ class Trainer:
       if current_step < warmup_steps:
         return float(current_step + 1) / float(max(1, warmup_steps))
 
-      progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+      progress = float(current_step - warmup_steps) / float(
+          max(1, total_steps - warmup_steps)
+      )
+      progress = min(max(progress, 0.0), 1.0)
       return 0.5 * (1.0 + math.cos(math.pi * progress))
 
     return LambdaLR(self.optimizer, lr_lambda)
+
 
 
 
