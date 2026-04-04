@@ -55,7 +55,7 @@ if __name__ == "__main__":
   # print("Training dataset length:", len(ds_train))
   # print("Validation dataset lenth:", len(ds_val))
 
-  trainer = Train(config=config, data_dir=data_dir)
+  trainer = Trainer(config=config, data_dir=data_dir)
   trainer.fit()
   # print_class_distribution(ds_train)
 
