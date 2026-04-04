@@ -333,7 +333,7 @@ class Trainer:
 
         if i % 100 == 0:
           print(
-            f"Val Epoch: [{epoch + 1}/{len(self.n_epochs)}] "
+            f"Val Epoch: [{epoch + 1}/{self.n_epochs}] "
             f"[{i}/{len(self.val_loader)}] "
             f"Loss {loss_meter.val:.3f} ({loss_meter.avg:.3f}) "
             f"Time {iter_meter.val:.3f} ({iter_meter.avg:.3f})"
