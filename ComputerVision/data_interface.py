@@ -11,21 +11,21 @@ from torch.utils.data import Dataset
 class DatasetInterface(Dataset):
   def __init__(
       self,
-      coco: dict[str, Any],
+      data_labels: dict[str, Any],
       img_dir: str,
       transforms: Optional[A.Compose] = None,
   ):
-    if "images" not in coco:
-        raise ValueError("COCO data is missing required key: 'images'")
-    if "categories" not in coco:
-        raise ValueError("COCO data is missing required key: 'categories'")
+    if "images" not in data_labels:
+        raise ValueError("Data labels missing required key: 'images'")
+    if "categories" not in data_labels:
+        raise ValueError("Data labels missing required key: 'categories'")
 
-    self.images: list[dict[str, Any]] = coco["images"]
+    self.images: list[dict[str, Any]] = data_labels["images"]
     self.image_dir: str = img_dir
-    self.categories: list[dict[str, Any]] = sorted(coco["categories"], key=lambda c: c["id"])
+    self.categories: list[dict[str, Any]] = sorted(data_labels["categories"], key=lambda c: c["id"])
     self.transforms = transforms
 
-    raw_annotations = coco.get("annotations", [])
+    raw_annotations = data_labels.get("annotations", [])
 
     # Original COCO category id -> contiguous training id [0, N-1]
     self.orig_id_to_train_id: dict[int, int] = {

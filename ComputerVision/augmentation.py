@@ -19,7 +19,6 @@ def build_train_augmentations(image_size: int | None = None) -> A.Compose:
     A.Affine(
       scale=(0.90, 1.10),
       translate_percent=(-0.08, 0.08),
-      rotate=(-12, 12),
       shear=(-5, 5),
       p=0.7,
     ),

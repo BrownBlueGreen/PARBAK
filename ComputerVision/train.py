@@ -1,12 +1,15 @@
 import os, torch, time, argparse, json
 from data_interface import DatasetInterface
-from detection_collator import DetectionCollator
+from detection_collator import HFObjectDetectionCollator
 from torch.utils.data import DataLoader
 import yaml
 from utils import Config
-from model_trainer import Trainer
+# from model_trainer import Trainer
 from collections import defaultdict
 from augmentation import build_train_augmentations, build_val_augmentations
+from transformers import Trainer, TrainingArguments, AutoImageProcessor, AutoModelForObjectDetection
+from pprint import pprint
+from map_evaluator import MAPEvaluator
 
 def print_class_distribution(dataset):
     class_counts = defaultdict(int)
@@ -33,7 +36,7 @@ if __name__ == "__main__":
 
   parser = argparse.ArgumentParser(description="trainer")
   parser.add_argument('--config_file', type=str, default='config/config.yaml', help="path to YAML config")
-  parser.add_argument('--output_dir', type=str, default=None, help="path to output directory (optional); defaults to outputs/model_name")
+  # parser.add_argument('--output_dir', type=str, default=None, help="path to output directory (optional); defaults to outputs/model_name")
   parser.add_argument('--data_dir', type=str, default=None, help="path to data directory")
   args = parser.parse_args()
 
@@ -43,39 +46,68 @@ if __name__ == "__main__":
     config = Config(config_dict=config_dict)
 
   data_dir = args.data_dir
+  
+  train_labels_path = os.path.join(data_dir, "coco_train/labels.json")
+  train_img_dir = os.path.join(data_dir, "coco_train/data")
 
-  # with open("/tmp/coco/train/labels.json", "r") as f:
-  #   train = json.load(f)
-  # with open("/tmp/coco/val/labels.json", "r") as f:
-  #   val = json.load(f)
+  val_labels_path = os.path.join(data_dir, "coco_val/labels.json")
+  val_img_dir = os.path.join(data_dir, "coco_val/data")
 
-  # ds_train = DatasetInterface(coco=train, img_dir="/tmp/coco/train/data", transforms=build_train_augmentations(image_size=640))
-  # ds_val = DatasetInterface(coco=val, img_dir="/tmp/coco/val/data", transforms=build_val_augmentations())
+  print("data_dir:", data_dir)
+  print("labels_path:", train_labels_path)
+  print("image_dir:", train_img_dir)
 
-  # print("Training dataset length:", len(ds_train))
-  # print("Validation dataset lenth:", len(ds_val))
+  with open(train_labels_path, "r") as f:
+    train_labels = json.load(f)
+  with open(val_labels_path, "r") as f:
+    val_labels = json.load(f)
 
-  trainer = Trainer(config=config, data_dir=data_dir)
-  trainer.fit()
-  # print_class_distribution(ds_train)
+  train_dataset = DatasetInterface(train_labels, train_img_dir, build_train_augmentations(image_size=640))
+  val_dataset = DatasetInterface(val_labels, val_img_dir, build_train_augmentations(image_size=640))
 
-  # MODEL_NAME = "PekingU/rtdetr_v2_r18vd"
-  # collator_fn = DetectionCollator(MODEL_NAME)
+  checkpoint = "PekingU/rtdetr_v2_r18vd"
+  image_processor = AutoImageProcessor.from_pretrained(checkpoint)
 
-  # train_loader = DataLoader(
-  #   ds_train, 
-  #   batch_size=4,
-  #   shuffle=True,
-  #   num_workers=1,
-  #   collate_fn=collator_fn,
-  #   pin_memory = False,
-  # )
+  model = AutoModelForObjectDetection.from_pretrained(
+    checkpoint,
+    id2label=train_dataset.id_2_label,
+    label2id=train_dataset.label_2_id,
+    ignore_mismatched_sizes=True,
+  )
 
-  # for batch in train_loader:
-  #   label = batch["labels"][0]
-  #   print(label["boxes"][:5])
+  data_collator = HFObjectDetectionCollator(image_processor=image_processor)
 
-  #   print(label.keys())
-  #   break
+  training_args = TrainingArguments(
+    output_dir="outputs/rtdetr",
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=8,
+    num_train_epochs=1,
+    learning_rate=1e-4,
+    eval_strategy="epoch",
+    save_strategy="epoch",
+    remove_unused_columns=False,
+    load_best_model_at_end=True,
+    metric_for_best_model="eval_map",
+  )
+
+  eval_compute_metrics_fn = MAPEvaluator(
+    image_processor=image_processor,
+    threshold=0.01,
+    id2label=train_dataset.id_2_label,
+  )
+
+  trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=val_dataset,
+    data_collator=data_collator,
+    processing_class=image_processor,
+    compute_metrics=eval_compute_metrics_fn,
+  )
+
+  trainer.train()
+  metrics = trainer.evaluate(eval_dataset=val_dataset, metric_key_prefix="eval")
+  pprint(metrics)
 
 

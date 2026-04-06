@@ -16,7 +16,7 @@ def download_data():
     max_samples=5000,
     shuffle=True,
     seed=42,
-    dataset_name="oi_train",
+    # dataset_name="oi_train",
   )
   val = foz.load_zoo_dataset(
     "open-images-v7",
@@ -27,7 +27,7 @@ def download_data():
     max_samples=1000,
     shuffle=True,
     seed=42,
-    dataset_name="oi_val",
+    # dataset_name="oi_val",
   )
   return train, val
 
