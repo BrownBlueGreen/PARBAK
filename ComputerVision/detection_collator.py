@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Tuple
 from PIL import Image
 from transformers import AutoImageProcessor
+import torch
 
 class HFObjectDetectionCollator:
   def __init__(self, image_processor):
