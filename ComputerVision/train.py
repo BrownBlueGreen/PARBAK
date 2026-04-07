@@ -47,11 +47,11 @@ if __name__ == "__main__":
 
   data_dir = args.data_dir
   
-  train_labels_path = os.path.join(data_dir, "coco_train/labels.json")
-  train_img_dir = os.path.join(data_dir, "coco_train/data")
+  train_labels_path = os.path.join(data_dir, "train/labels.json")
+  train_img_dir = os.path.join(data_dir, "train/data")
 
-  val_labels_path = os.path.join(data_dir, "coco_val/labels.json")
-  val_img_dir = os.path.join(data_dir, "coco_val/data")
+  val_labels_path = os.path.join(data_dir, "val/labels.json")
+  val_img_dir = os.path.join(data_dir, "val/data")
 
   print("data_dir:", data_dir)
   print("labels_path:", train_labels_path)
