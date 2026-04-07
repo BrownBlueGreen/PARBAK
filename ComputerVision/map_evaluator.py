@@ -76,29 +76,46 @@ class MAPEvaluator:
 
     @torch.no_grad()
     def __call__(self, eval_pred):
-        predictions = eval_pred.predictions
-        targets = eval_pred.label_ids
+      predictions = eval_pred.predictions
+      targets = eval_pred.label_ids
 
-        image_sizes = self._collect_image_sizes(targets)
-        post_processed_targets = self._collect_targets(targets, image_sizes)
-        post_processed_predictions = self._collect_predictions(predictions, image_sizes)
+      print("type(targets):", type(targets))
+      print("len(targets):", len(targets) if hasattr(targets, "__len__") else "no len")
 
-        metric = MeanAveragePrecision(box_format="xyxy", class_metrics=True)
-        metric.warn_on_many_detections = False
-        metric.update(post_processed_predictions, post_processed_targets)
-        metrics = metric.compute()
+      if hasattr(targets, "__len__") and len(targets) > 0:
+        print("type(targets[0]):", type(targets[0]))
+        print("targets[0]:", targets[0])
 
-        classes = metrics.pop("classes")
-        map_per_class = metrics.pop("map_per_class")
-        mar_100_per_class = metrics.pop("mar_100_per_class")
+        if isinstance(targets[0], dict):
+          print("targets[0].keys():", targets[0].keys())
+        elif hasattr(targets[0], "__len__") and len(targets[0]) > 0:
+          print("type(targets[0][0]):", type(targets[0][0]))
+          print("targets[0][0]:", targets[0][0])
+          if isinstance(targets[0][0], dict):
+            print("targets[0][0].keys():", targets[0][0].keys())
 
-        for class_id, class_map, class_mar in zip(classes, map_per_class, mar_100_per_class):
-            class_id = int(class_id.item())
-            class_name = self.id2label[class_id] if self.id2label is not None else str(class_id)
-            metrics[f"map_{class_name}"] = class_map
-            metrics[f"mar_100_{class_name}"] = class_mar
+      return {}
 
-        return {
-            k: round(v.item(), 4) if torch.is_tensor(v) else round(float(v), 4)
-            for k, v in metrics.items()
-        }
+      image_sizes = self._collect_image_sizes(targets)
+      post_processed_targets = self._collect_targets(targets, image_sizes)
+      post_processed_predictions = self._collect_predictions(predictions, image_sizes)
+
+      metric = MeanAveragePrecision(box_format="xyxy", class_metrics=True)
+      metric.warn_on_many_detections = False
+      metric.update(post_processed_predictions, post_processed_targets)
+      metrics = metric.compute()
+
+      classes = metrics.pop("classes")
+      map_per_class = metrics.pop("map_per_class")
+      mar_100_per_class = metrics.pop("mar_100_per_class")
+
+      for class_id, class_map, class_mar in zip(classes, map_per_class, mar_100_per_class):
+        class_id = int(class_id.item())
+        class_name = self.id2label[class_id] if self.id2label is not None else str(class_id)
+        metrics[f"map_{class_name}"] = class_map
+        metrics[f"mar_100_{class_name}"] = class_mar
+
+      return {
+        k: round(v.item(), 4) if torch.is_tensor(v) else round(float(v), 4)
+        for k, v in metrics.items()
+      }

@@ -45,13 +45,13 @@ if __name__ == "__main__":
     config_dict = yaml.safe_load(file)
     config = Config(config_dict=config_dict)
 
-  data_dir = args.data_dir
+  data_dir = "/tmp/" #args.data_dir
   
-  train_labels_path = os.path.join(data_dir, "train/labels.json")
-  train_img_dir = os.path.join(data_dir, "train/data")
+  train_labels_path = os.path.join(data_dir, "coco_train/labels.json")
+  train_img_dir = os.path.join(data_dir, "coco_train/data")
 
-  val_labels_path = os.path.join(data_dir, "val/labels.json")
-  val_img_dir = os.path.join(data_dir, "val/data")
+  val_labels_path = os.path.join(data_dir, "coco_val/labels.json")
+  val_img_dir = os.path.join(data_dir, "coco_val/data")
 
   print("data_dir:", data_dir)
   print("labels_path:", train_labels_path)
@@ -106,7 +106,7 @@ if __name__ == "__main__":
     compute_metrics=eval_compute_metrics_fn,
   )
 
-  trainer.train()
+  # trainer.train()
   metrics = trainer.evaluate(eval_dataset=val_dataset, metric_key_prefix="eval")
   pprint(metrics)
 
