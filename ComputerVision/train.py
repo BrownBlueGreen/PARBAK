@@ -45,7 +45,7 @@ if __name__ == "__main__":
     config_dict = yaml.safe_load(file)
     config = Config(config_dict=config_dict)
 
-  data_dir = "/tmp/" #args.data_dir
+  data_dir = args.data_dir
   
   train_labels_path = os.path.join(data_dir, "coco_train/labels.json")
   train_img_dir = os.path.join(data_dir, "coco_train/data")
@@ -81,7 +81,7 @@ if __name__ == "__main__":
     output_dir="outputs/rtdetr",
     per_device_train_batch_size=8,
     per_device_eval_batch_size=8,
-    num_train_epochs=1,
+    num_train_epochs=20,
     learning_rate=1e-4,
     eval_strategy="epoch",
     save_strategy="epoch",
