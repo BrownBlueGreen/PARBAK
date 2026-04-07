@@ -53,6 +53,9 @@ if __name__ == "__main__":
   val_labels_path = os.path.join(data_dir, "val/labels.json")
   val_img_dir = os.path.join(data_dir, "val/data")
 
+  test_labels_path = os.path.join(data_dir, "test/labels.json")
+  test_img_dir = os.path.join(data_dir, "test/data")
+
   print("data_dir:", data_dir)
   print("labels_path:", train_labels_path)
   print("image_dir:", train_img_dir)
@@ -61,9 +64,12 @@ if __name__ == "__main__":
     train_labels = json.load(f)
   with open(val_labels_path, "r") as f:
     val_labels = json.load(f)
+  with open(test_labels_path, "r") as f:
+    test_labels = json.load(f)
 
   train_dataset = DatasetInterface(train_labels, train_img_dir, build_train_augmentations(image_size=640))
   val_dataset = DatasetInterface(val_labels, val_img_dir, build_train_augmentations(image_size=640))
+  test_dataset = DatasetInterface(test_labels, test_img_dir)
 
   checkpoint = "PekingU/rtdetr_v2_r18vd"
   image_processor = AutoImageProcessor.from_pretrained(checkpoint)
@@ -106,7 +112,7 @@ if __name__ == "__main__":
     compute_metrics=eval_compute_metrics_fn,
   )
 
-  # trainer.train()
+  trainer.train()
   metrics = trainer.evaluate(eval_dataset=val_dataset, metric_key_prefix="eval")
   pprint(metrics)
 

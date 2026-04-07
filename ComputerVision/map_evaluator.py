@@ -79,23 +79,6 @@ class MAPEvaluator:
       predictions = eval_pred.predictions
       targets = eval_pred.label_ids
 
-      print("type(targets):", type(targets))
-      print("len(targets):", len(targets) if hasattr(targets, "__len__") else "no len")
-
-      if hasattr(targets, "__len__") and len(targets) > 0:
-        print("type(targets[0]):", type(targets[0]))
-        print("targets[0]:", targets[0])
-
-        if isinstance(targets[0], dict):
-          print("targets[0].keys():", targets[0].keys())
-        elif hasattr(targets[0], "__len__") and len(targets[0]) > 0:
-          print("type(targets[0][0]):", type(targets[0][0]))
-          print("targets[0][0]:", targets[0][0])
-          if isinstance(targets[0][0], dict):
-            print("targets[0][0].keys():", targets[0][0].keys())
-
-      return {}
-
       image_sizes = self._collect_image_sizes(targets)
       post_processed_targets = self._collect_targets(targets, image_sizes)
       post_processed_predictions = self._collect_predictions(predictions, image_sizes)

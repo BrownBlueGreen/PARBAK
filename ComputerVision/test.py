@@ -7,60 +7,74 @@ import os
 import albumentations as A
 from data_interface import DatasetInterface
 from augmentation import build_train_augmentations
+import fiftyone.zoo as foz
+from utils import TARGET_CLASSES
 
 if __name__ == "__main__":
+
+  test = foz.load_zoo_dataset(
+    "open-images-v7",
+    split="test",
+    label_types=["detections"],
+    classes=TARGET_CLASSES,
+    only_matching=True,
+    max_samples=1000,
+    shuffle=True,
+    seed=42,
+    # dataset_name="oi_val",
+  )
   # train, val = download_data()
 
   # print(train.info)
 
-  # train.export(
-  #   export_dir="/tmp/coco_train",
-  #   dataset_type=fo.types.COCODetectionDataset,
-  # )
+  test.export(
+    export_dir="/tmp/coco_test",
+    dataset_type=fo.types.COCODetectionDataset,
+  )
 
   # val.export(
   #     export_dir="/tmp/coco_val",
   #     dataset_type=fo.types.COCODetectionDataset,
   # )
 
-  with open("/tmp/coco_train/labels.json", "r") as f:
-    train_coco = json.load(f)
+  # with open("/tmp/coco_train/labels.json", "r") as f:
+  #   train_coco = json.load(f)
 
-  with open("/tmp/coco_val/labels.json", "r") as f:
-    val_coco = json.load(f)
+  # with open("/tmp/coco_val/labels.json", "r") as f:
+  #   val_coco = json.load(f)
 
-  # print("Train keys")
-  # for k in train_coco:
-  #   print(k)
+  # # print("Train keys")
+  # # for k in train_coco:
+  # #   print(k)
 
 
-  # print(train_coco["annotations"][2])
-  img_dir = "/tmp/coco_train/data"
+  # # print(train_coco["annotations"][2])
+  # img_dir = "/tmp/coco_train/data"
 
-  ds_train_tr = DatasetInterface(
-    train_coco, 
-    img_dir,
-    # transforms=build_train_augmentations(image_size=640),
-  )
+  # ds_train_tr = DatasetInterface(
+  #   train_coco, 
+  #   img_dir,
+  #   # transforms=build_train_augmentations(image_size=640),
+  # )
 
-  image, target = ds_train_tr[582]
-  anns = target["annotations"]
+  # image, target = ds_train_tr[582]
+  # anns = target["annotations"]
 
-  # draw = ImageDraw.Draw(image)
-  # for a in anns:
-  #   x, y, w, h = a["bbox"]
-  #   draw.rectangle((x, y, x + w, y + h), outline="red", width=1)
-  #   draw.text((x, y), ds_train_tr.id_2_label[a["category_id"]], fill="white")
-  image.show()
+  # # draw = ImageDraw.Draw(image)
+  # # for a in anns:
+  # #   x, y, w, h = a["bbox"]
+  # #   draw.rectangle((x, y, x + w, y + h), outline="red", width=1)
+  # #   draw.text((x, y), ds_train_tr.id_2_label[a["category_id"]], fill="white")
+  # image.show()
 
-  # pick one image
-  img_info = train_coco["images"][582]
-  image_id = img_info["id"]
+  # # pick one image
+  # img_info = train_coco["images"][582]
+  # image_id = img_info["id"]
 
   # open image
-  img_path = os.path.join(img_dir, img_info["file_name"])
-  image = Image.open(img_path).convert("RGB")
-  image.show()
+  # img_path = os.path.join(img_dir, img_info["file_name"])
+  # image = Image.open(img_path).convert("RGB")
+  # image.show()
   # image_np = np.array(image)
 
   # # gather annotations for this image
