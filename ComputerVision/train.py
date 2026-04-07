@@ -85,15 +85,21 @@ if __name__ == "__main__":
 
   training_args = TrainingArguments(
     output_dir="outputs/rtdetr",
+    num_train_epochs=20,
+    max_grad_norm=0.1,
+    learning_rate=1e-4,
+    warmup_steps=150,
     per_device_train_batch_size=8,
     per_device_eval_batch_size=8,
-    num_train_epochs=20,
-    learning_rate=1e-4,
+    dataloader_num_workers=2,
     eval_strategy="epoch",
     save_strategy="epoch",
+    save_total_limits=4
     remove_unused_columns=False,
+    eval_do_concat_batches=False,
     load_best_model_at_end=True,
     metric_for_best_model="eval_map",
+    report_to="tensorboard"
   )
 
   eval_compute_metrics_fn = MAPEvaluator(
